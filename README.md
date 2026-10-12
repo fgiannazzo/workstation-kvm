@@ -6,7 +6,7 @@ USB switches, and exposes every action and macro to a Stream Deck.
 
 ## Status
 
-Tracer bullets 1, 2, 3, 4, 6 and 7 of 7 (`docs/BRIEF.md`, section 6) are in. The hardware write path is
+Tracer bullets 1 to 7 of 7 (`docs/BRIEF.md`, section 6) are in. The hardware write path is
 exactly two commands wide (PBP on over the USB bridge, PBP off over the video cable); the only
 network writes go to the ESP32 controller (or its mock).
 
@@ -43,9 +43,18 @@ What works today:
 - `AppCore` and `SwitchboardApp`: the menu bar app (`make app`): a status glyph, a popover with the
   state and virtual controls, a macro editor, settings, a log, launch at login, and the
   `switchboard://run/{id}` URL scheme. See "Menu bar app" below.
+- `LocalAPI`: the HTTP API of [`docs/API.md`](docs/API.md) on 127.0.0.1 (`LocalAPIServer`) with a bearer
+  token in the login keychain, `GET /health|state|actions|macros|events`, `POST /run/{id}`, and
+  server-sent events for state changes and run progress; `LocalAPIClient`, the Swift client
+  `switchboardctl` uses; `StreamDeckWrappers`, the generated `.command` files for the Stream Deck
+  "Open" action.
+- `switchboardctl state|events|token|serve|streamdeck export`; `run`, `actions` and `macros` go
+  through the app when it is running and work by themselves when it is not.
 
-Next: the local API and the Stream Deck wrappers (tracer bullet 5). See `docs/BRIEF.md` for the
-specification and `docs/DESIGN.md` for the architecture.
+Next: the menu bar app starting the local API. `AppModel.startServices()` is the stub for it and
+`LocalAPIServer.start(runtime:)` is the one line that fills it; until then `switchboardctl serve`
+serves the same API. See `docs/BRIEF.md` for the specification and `docs/DESIGN.md` for the
+architecture.
 
 ## Requirements
 
@@ -151,10 +160,17 @@ swift run switchboardctl monitor bridge list
 swift run switchboardctl monitor bridge reset
 swift run switchboardctl run guest [--json]                # a macro: PBP on, USB to port 2, then verify
 swift run switchboardctl run usb.select port=2             # a single action with its parameters
+swift run switchboardctl run guest --local                 # in this process, never through the app
 swift run switchboardctl actions [--json]
 swift run switchboardctl macros [--json]
 swift run switchboardctl settings show [--json]
 swift run switchboardctl settings set controllerURL http://127.0.0.1:48700
+swift run switchboardctl state [--json]                    # the app's state, through the local API
+swift run switchboardctl events [--json]                   # state and run events, until Ctrl-C
+swift run switchboardctl token                             # the local API's bearer token
+swift run switchboardctl serve [--port N] [--poll]         # the local API without the app
+swift run switchboardctl streamdeck export [DIR]           # .command wrappers for Stream Deck keys
+swift run switchboardctl --version
 swift run switchboardctl --help
 ```
 
@@ -236,16 +252,57 @@ The `hdmi.*` and `usb.*` actions (and so `guest` and `solo`) need a controller: 
 `settings set controllerURL http://host:port` or per shell with `SWITCHBOARD_CONTROLLER_URL`
 (the environment wins). `settings.json` and `macros.json` live in
 `~/Library/Application Support/Switchboard/`; `SWITCHBOARD_SUPPORT_DIR` points the CLI somewhere
-else. `macros.json` is `{"macros": [...]}`, the same shape `GET /macros` will serve; edit it by
+else. `macros.json` is `{"macros": [...]}`, the same shape `GET /macros` serves; edit it by
 hand to add macros (`docs/DESIGN.md`, "Actions", has the format). The settings are
 `controllerURL`, `displayNameContains` (default `SDQHD`), `pollingIntervalSeconds` (30),
 `localAPIPort` (48600) and `launchAtLogin` (false).
 
 Exit codes: 0 ok, 1 error, 2 display not found, 3 write unverified, 4 USB bridge not found,
 5 USB bridge busy (another client, typically a browser's WebUSB client, holds it exclusively),
-6 controller unreachable (`controller` and `run` commands), 7 another run in progress (`run`).
+6 controller unreachable (`controller` and `run` commands), 7 another run in progress (`run`),
+8 the Switchboard app is not running (`state`, `events`).
 
 Hardware checks are manual and live in `docs/HARDWARE-CHECKLIST.md`.
+
+## Local API
+
+The API listens on `http://127.0.0.1:48600` (the `localAPIPort` setting), loopback only. The menu bar
+app is meant to start it at launch (`LocalAPIServer.start(runtime:)`, not wired in yet); until then
+`switchboardctl serve` serves the same thing from the command line. [`docs/API.md`](docs/API.md) is
+the contract; the Stream Deck plugin, `switchboardctl` and the generated wrappers are all written
+against it.
+
+| Request | Answers |
+| --- | --- |
+| `GET /health` (no token) | `{"ok":true,"name":"Switchboard","version":"0.1.0"}` |
+| `GET /state` | the `SwitchboardState`: PBP, main input, USB port, HDMI inputs, reachability, last error |
+| `GET /actions`, `GET /macros` | what can be run |
+| `POST /run/{id}` | `202` with a run id; a macro or an action with a JSON body of parameters. `400` bad parameter, `404` unknown id, `409` another run in progress |
+| `GET /events` | server-sent events: a `state` event on connect and on every change, `run` events for progress, `: keepalive` every 15 s |
+
+Everything but `/health` needs `Authorization: Bearer <token>`. The token is 32 random bytes,
+base64url, made on first launch and kept in the login keychain (service
+`io.github.fgiannazzo.switchboard`, account `local-api-token`); `switchboardctl token` prints it.
+It is never accepted in a URL.
+
+```bash
+TOKEN=$(swift run switchboardctl token)
+curl -s http://127.0.0.1:48600/health
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:48600/state
+swift run switchboardctl serve         # the same API without the app, for development
+```
+
+`run`, `actions` and `macros` use the app when `/health` answers within 300 ms (one run at a time,
+shared with the menu bar) and do the work themselves when it does not. `state` and `events` need the
+app and exit 8 without it. Setting `SWITCHBOARD_TOKEN_FILE=<path>` makes the CLI keep the token in a
+file instead of the keychain (development and tests only).
+
+## Stream Deck
+
+Phase 1 needs no plugin: the built-in **System → Open** action opens `switchboard://run/{id}`, or a
+`.command` wrapper written by `switchboardctl streamdeck export`. See
+[`docs/STREAMDECK.md`](docs/STREAMDECK.md), which also says why the Website action does not fit.
+Phase 2 is the plugin below.
 
 ## Hardware rules
 
