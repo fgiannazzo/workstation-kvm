@@ -77,7 +77,7 @@ switchboardctl, SwitchboardApp -> LocalAPI -> Actions -> Devices -> DDCKit -> IO
 - Transports and clients are `actor`s. `StateStore` is `@MainActor @Observable final class`.
 - No `@unchecked Sendable` without a comment saying why. No `DispatchQueue` where an actor
   does the job. IOKit callbacks hop back to the owning actor.
-- Timing constants live in one `enum Timing` in `Devices` so tests can shorten them
+- Timing constants live in one `enum Timing` in `DDCKit` so tests can shorten them
   (`Timing.settleAfterModeChange = 4.0 s`, `Timing.betweenDumps = 0.5 s`,
   `Timing.readRetryGap = 0.15 s`, `Timing.requestToReply = 0.05 s`). Pass a `Clock` or
   make the sleeps injectable so tests never wait.
@@ -219,6 +219,8 @@ notify: (String) -> Void }`. With no controller configured, `hdmi.*` and `usb.*`
 action id.
 
 ## LocalAPI
+
+The wire contract is `docs/API.md`; clients are built against that file.
 
 `GET /state` (SwitchboardState), `GET /actions`, `GET /macros`, `POST /run/{id}` (optional
 JSON body with parameters; 202 with a run id, result pushed on `/events`), `GET /events`
