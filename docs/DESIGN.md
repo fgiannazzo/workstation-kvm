@@ -22,16 +22,22 @@ and this file gets fixed.
 
 ## Toolchain
 
-- Swift 6.4. Xcode is optional: the project must build from the Command Line Tools alone.
-  Everything is SwiftPM: no `.xcodeproj`, no `xcodebuild`.
+- Swift 6.4 with **Xcode 26 or later selected** (`xcode-select -p` prints the Xcode developer
+  directory). Everything is SwiftPM: no `.xcodeproj`, no `xcodebuild`.
+- Known toolchain bug, 2026-10-11: with only the Command Line Tools selected, SwiftPM's Swift
+  Build backend passes `-load-resolved-plugin` for the Observation and Swift macros but not for
+  `TestingMacros`, so some test targets fail with "plugin for module 'TestingMacros' not found".
+  Until Apple fixes it, build with Xcode's toolchain: `sudo xcode-select -s
+  /Applications/Xcode.app/Contents/Developer`, or per invocation
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`. `make build` and
+  `make test` set `DEVELOPER_DIR` automatically when Xcode is installed but not selected.
 - `// swift-tools-version: 6.0`, `platforms: [.macOS(.v15)]`, Swift 6 language mode on every target.
-- Tests use **Swift Testing** (`import Testing`, `@Test`, `#expect`). XCTest is not available
-  without Xcode, so never import it; Swift Testing works in both setups.
+- Tests use **Swift Testing** (`import Testing`, `@Test`, `#expect`). Never import XCTest.
 - The app bundle is assembled by `Scripts/make-app.sh` from the SwiftPM executable plus
   `App/Info.plist`, then ad-hoc signed (`codesign -s -`). `make app` wraps it.
 - No third-party dependencies in the Swift package. The Stream Deck plugin (TypeScript, in
   `StreamDeckPlugin/`) is a separate npm package and may use the Elgato SDK.
-- Verification for every PR: `swift build && swift test`.
+- Verification for every PR: `swift build && swift test` (or `make build test`).
 
 ## Package layout
 
@@ -68,9 +74,13 @@ switchboardctl, SwitchboardApp -> LocalAPI -> Actions -> Devices -> DDCKit -> IO
                                    |            |                     \-> USBReenumerate
                                    |            +-> StateStore -> SwitchboardCore
                                    +-> TinyHTTP          ESP32Kit -> TinyHTTP, SwitchboardCore
+Devices, DDCKit -> SwitchboardCore   (PBPState, MainInput)
 ```
 
 `SwitchboardCore` has no dependencies and no I/O. Nothing depends on an executable.
+
+Until `LocalAPI` exists (tracer bullet 5), `switchboardctl` links `Devices` and `DDCKit`
+directly for `monitor list` and `monitor read`; from tracer bullet 5 on it talks to the API.
 
 ## Concurrency
 
@@ -79,8 +89,10 @@ switchboardctl, SwitchboardApp -> LocalAPI -> Actions -> Devices -> DDCKit -> IO
   does the job. IOKit callbacks hop back to the owning actor.
 - Timing constants live in one `enum Timing` in `DDCKit` so tests can shorten them
   (`Timing.settleAfterModeChange = 4.0 s`, `Timing.betweenDumps = 0.5 s`,
-  `Timing.readRetryGap = 0.15 s`, `Timing.requestToReply = 0.05 s`). Pass a `Clock` or
-  make the sleeps injectable so tests never wait.
+  `Timing.readRetryGap = 0.15 s`, `Timing.requestToReply = 0.05 s`). Sleeps are injected as
+  `public typealias Sleeper = @Sendable (Duration) async -> Void`: production passes
+  `Timing.realSleep` (a wrapped `Task.sleep(for:)`), tests pass a closure that records the
+  duration and returns at once, so the suite never waits.
 
 ## SwitchboardCore (shared types)
 
@@ -161,7 +173,12 @@ public actor VideoCableDDC: DDCTransport   // IOAVService; selected by EDID name
 public actor LGUSBBridge: DDCTransport     // IOHIDManager; write-only; paired to the display by EDID serial
 public actor FakeDDC: DDCTransport         // records writes, serves scripted reads, for tests
 
-public struct ExternalDisplay: Sendable { name: String (EDID descriptor 0xFC), serial: UInt32, edid: Data }
+public enum DDCError: Error { displayNotFound(String), ioKit(Int32, operation: String), invalidReply([UInt8]), readUnsupported, noReply, invalidEDID(String) }
+
+/// Pure EDID parsing (unit-tested with a synthetic 128-byte EDID): name from descriptor 0xFC,
+/// numeric serial from bytes 12-15 little-endian, serial string from descriptor 0xFF, PNP id, product code.
+public struct EDID: Sendable { static func parse(_ data: Data) throws -> EDID }
+public struct ExternalDisplay: Sendable { name: String, serial: UInt32, serialString: String?, manufacturer: String, productCode: UInt16, edid: Data }
 public enum DisplayEnumerator { static func externalDisplays() throws -> [ExternalDisplay] }
 ```
 
@@ -178,12 +195,20 @@ public enum LGDualUpCommand: String, CaseIterable, Sendable, Codable {
     case pbpOff     // video cable only, 0xD7 = 1, expect read-back 1
 }
 public struct WriteOutcome: Sendable, Equatable { command, transport: String, expected: UInt16, observed: UInt16?, verified: Bool }
+public enum DualUpCode { static let pbp: UInt8 = 0xD7; static let mainInput: UInt8 = 0xF5 }
+public struct DualUpReading: Sendable, Equatable { pbp: PBPState, mainInput: MainInput, raw: [UInt8: UInt16] }
 public actor LGDualUp {
-    init(videoCable: any DDCTransport, usbBridge: any DDCTransport, sleep: @Sendable (Duration) async -> Void = Task.sleep)
+    init(videoCable: any DDCTransport, usbBridge: any DDCTransport, sleep: @escaping Sleeper = Timing.realSleep)
     func perform(_ command: LGDualUpCommand) async throws -> WriteOutcome   // write, settle, double-read 0xD7, compare
-    func readState() async throws -> DualUpReading                           // 0xD7 and 0xF5 via StableReader
+    func readState() async -> DualUpReading   // 0xD7 and 0xF5 via StableReader; never throws, unreadable = .unknown
 }
 ```
+
+Tracer bullet 1 ships `init(videoCable:sleep:)` and `readState()`; `usbBridge`,
+`LGDualUpCommand`, `WriteOutcome` and `perform` arrive with the whitelist in tracer bullet 2.
+`readState` does not throw: a code that cannot be read stably is `.unknown` and absent from
+`raw`. Whether the display is connected at all is a separate question (`VideoCableDDC.display()`
+throws `DDCError.displayNotFound`), which is how `switchboardctl` tells exit code 2 apart.
 
 `perform` never reports success from the write alone. `observed == nil` means unknown, and
 `verified == false`; the caller surfaces that as "unverified", not as failure of the monitor.
