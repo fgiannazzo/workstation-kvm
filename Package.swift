@@ -20,14 +20,19 @@ let package = Package(
             name: "IOAVServiceShim",
             linkerSettings: [.linkedFramework("IOKit")]
         ),
+        // C: IOUSBLib re-enumeration of the LG USB bridge (ported from the prototype's usbreset.c).
+        .target(
+            name: "USBReenumerate",
+            linkerSettings: [.linkedFramework("IOKit"), .linkedFramework("CoreFoundation")]
+        ),
         // Shared value types and protocols. No dependencies, no I/O.
         .target(name: "SwitchboardCore"),
-        // Packet encoders/decoders, DDCTransport, VideoCableDDC, FakeDDC, display enumeration.
+        // Packet encoders/decoders, DDCTransport, VideoCableDDC, LGUSBBridge, FakeDDC, display enumeration.
         .target(
             name: "DDCKit",
-            dependencies: ["IOAVServiceShim", "SwitchboardCore"]
+            dependencies: ["IOAVServiceShim", "USBReenumerate", "SwitchboardCore"]
         ),
-        // LGDualUp: reads today; the whitelist and verify-after-write flow arrive in tracer bullet 2.
+        // LGDualUp: the LGDualUpCommand whitelist and the verify-after-write flow.
         .target(
             name: "Devices",
             dependencies: ["DDCKit", "SwitchboardCore"]

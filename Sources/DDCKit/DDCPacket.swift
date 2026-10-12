@@ -16,6 +16,12 @@ public enum DDCPacket {
         bytes.reduce(destinationAddress ^ source) { $0 ^ $1 }
     }
 
+    /// Upper-case, space-separated hex, the way the brief and `docs/DESIGN.md` write bytes
+    /// (`84 03 D7 00 01 6E`).
+    public static func hexString(_ bytes: [UInt8]) -> String {
+        hex(bytes)
+    }
+
     /// VCP set: `84 03 code hi lo chk`.
     public static func vcpSet(code: UInt8, value: UInt16, source: DDCSource = .standard) -> [UInt8] {
         let body: [UInt8] = [0x84, 0x03, code, UInt8(value >> 8), UInt8(value & 0xFF)]
@@ -47,7 +53,7 @@ public enum DDCPacket {
     /// `51 84 03 code hi lo chk` (LEN = its length, 7), zero padded. The follow-up is the same
     /// report with byte 1 = 0x02, byte 3 = 0x04, byte 4 = 0x0B and byte 6 = 0x0B.
     ///
-    /// Encoder only. The transport that sends these (`LGUSBBridge`) is tracer bullet 2.
+    /// Encoder only; `LGUSBBridge` sends them. Always source 0x51: the bridge refuses anything else.
     public static func usbBridgeReports(set code: UInt8, value: UInt16) -> (first: [UInt8], second: [UInt8]) {
         let ddc = [DDCSource.standard.rawValue] + vcpSet(code: code, value: value, source: .standard)
         var first: [UInt8] = [0x08, 0x01, 0x55, 0x03, UInt8(ddc.count), 0x00, 0x03, UInt8(i2cAddress)]

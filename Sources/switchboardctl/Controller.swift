@@ -5,7 +5,7 @@ import SwitchboardCore
 
 // `switchboardctl controller ...`: the ESP32 controller (docs/ESP32-CONTRACT.md). Same split as
 // main.swift: logic lives in ESP32Kit, this file parses arguments and formats output.
-// Exit codes: 0 ok, 1 error, 5 controller unreachable (set in main.swift's error handling).
+// Exit codes: 0 ok, 1 error, 6 controller unreachable (set in main.swift's error handling).
 
 let controllerHelp = """
       controller state [OPTIONS]        read the ESP32 controller's state
@@ -304,7 +304,7 @@ private func controllerDiscover(_ options: ControllerOptions) async {
 private func controllerContractTest(_ options: ControllerOptions) async throws {
     let url = try await controllerBaseURL(options)
 
-    // An unreachable controller is exit 5, not six failed checks.
+    // An unreachable controller is exit 6, not six failed checks.
     do {
         _ = try await ESP32Client(baseURL: url).state()
     } catch let error as ControllerError {

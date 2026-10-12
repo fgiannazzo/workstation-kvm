@@ -6,18 +6,24 @@ USB switches, and exposes every action and macro to a Stream Deck.
 
 ## Status
 
-Tracer bullets 1, 6 and 7 of 7 (`docs/BRIEF.md`, section 6) are in. Nothing writes to the monitor
-yet; the only network writes go to the ESP32 controller (or its mock).
+Tracer bullets 1, 2, 6 and 7 of 7 (`docs/BRIEF.md`, section 6) are in. The hardware write path is
+exactly two commands wide (PBP on over the USB bridge, PBP off over the video cable); the only
+network writes go to the ESP32 controller (or its mock).
 
 What works today:
 
 - `DDCKit`: DDC/CI over the video cable through the private IOAVService API (`VideoCableDDC`),
-  display enumeration by EDID name (never by index), pure packet encoders and reply decoder
-  tested against the byte vectors in `docs/DESIGN.md`, settle-and-double-dump reads
-  (`StableReader`), and `FakeDDC` for tests.
-- `Devices`: `LGDualUp.readState()` reads PBP (VCP 0xD7) and the main input (VCP 0xF5).
+  the monitor's USB HID bridge (`LGUSBBridge`, write-only, paired to the display by EDID serial),
+  software re-enumeration of the bridge (`USBReenumerator`), display enumeration by EDID name
+  (never by index), pure packet encoders and reply decoder tested against the byte vectors in
+  `docs/DESIGN.md`, settle-and-double-dump reads (`StableReader`), and `FakeDDC` for tests.
+- `Devices`: the `LGDualUpCommand` whitelist (`pbpOn`: 0xD7 = 0 over the USB bridge; `pbpOff`:
+  0xD7 = 1 over the video cable) and `LGDualUp.perform`, which writes, waits 4 s for the link to
+  re-train, reads 0xD7 back twice over the video cable and reports `verified` only when both
+  reads agree with the expectation. `LGDualUp.readState()` reads PBP (0xD7) and the main input
+  (0xF5).
 - `SwitchboardCore`: the shared value types (`SwitchboardState`, `ControllerState`, ...).
-- `switchboardctl monitor list` and `switchboardctl monitor read`.
+- `switchboardctl monitor list|read|pbp on|pbp off|bridge list|bridge reset`.
 - `TinyHTTP`: a small HTTP/1.1 server on Network.framework with server-sent events, shared by the
   controller mock and (later) the local API.
 - `ESP32Kit`: `ESP32Client` (the `ControllerClient` for the ESP32 contract, with a reconnecting
@@ -26,10 +32,9 @@ What works today:
   in [`docs/ESP32-CONTRACT.md`](docs/ESP32-CONTRACT.md).
 - `switchboardctl controller ...`: talk to the controller, run the mock, run the contract test.
 
-Next: `LGUSBBridge` and `monitor pbp on|off` with verify-after-write (tracer bullet 2), then the
-state store, actions and macros (which is where `hdmi.*` and `usb.*` get wired to `ESP32Kit`), the
-menu bar app and the local API. See `docs/BRIEF.md` for the specification and `docs/DESIGN.md` for the
-architecture.
+Next: the state store, actions and macros (tracer bullet 3, where `hdmi.*` and `usb.*` get wired
+to `ESP32Kit`), then the menu bar app and the local API. See `docs/BRIEF.md` for the specification
+and `docs/DESIGN.md` for the architecture.
 
 ## Requirements
 
@@ -45,15 +50,18 @@ architecture.
 swift build && swift test     # or: make build && make test
 ```
 
-Tests never touch hardware: they run against `FakeDDC` with the brief's byte vectors, and against
-`MockESP32` on loopback for everything network. `make` selects Xcode's toolchain for you when Xcode
-is installed but `xcode-select` still points at the Command Line Tools.
+Tests never touch hardware: they run against `FakeDDC` and a fake HID device with the brief's
+byte vectors, and against `MockESP32` on loopback for everything network. `make` selects Xcode's
+toolchain for you when Xcode is installed but `xcode-select` still points at the Command Line Tools.
 
 ## Usage
 
 ```bash
 swift run switchboardctl monitor list
 swift run switchboardctl monitor read [--display SDQHD] [--json]
+swift run switchboardctl monitor pbp on|off [--display SDQHD] [--json] [--dry-run]
+swift run switchboardctl monitor bridge list
+swift run switchboardctl monitor bridge reset
 swift run switchboardctl --help
 ```
 
@@ -91,9 +99,38 @@ display: LG SDQHD  serial 0x0001E240
 A code that could not be read stably prints `unknown (unreadable)`; it is never defaulted.
 `--json` prints the same as an object (`pbp`, `mainInput`, `raw`).
 
-Exit codes: 0 ok, 1 error, 2 display not found (`monitor`), 5 controller unreachable (`controller`).
+`monitor pbp on` writes 0xD7 = 0 over the USB HID bridge (the only transport that turns PBP on);
+`monitor pbp off` writes 0xD7 = 1 over the video cable (the only transport that turns it off).
+Both then wait 4 s and read 0xD7 back over the video cable:
+
+```
+transport: USB bridge (SDQHD)
+writing 0xD7 = 0, then waiting 4.0 seconds for the link to settle
+verified: 0xD7 = 0 (on)
+```
+
+The write alone is never reported as success. `UNVERIFIED: 0xD7 read back 1 (off)` or
+`UNVERIFIED: 0xD7 unreadable` exit 3. `--dry-run` prints the exact bytes that would go out (the
+two 64-byte HID reports for `on`, the 6-byte DDC packet for `off`) and touches nothing.
+`--json` prints the `WriteOutcome` (`command`, `transport`, `expected`, `observed`, `verified`,
+`reading`). After a USB-triggered split the Studio's half comes up at 1920 x 1080; that is
+BetterDisplay's job, not this tool's.
+
+`monitor bridge list` prints the LG HID interfaces present (product id, product string, usage
+page, max output report size, serial); the serial must match the DualUp in `monitor list`.
+`monitor bridge reset` re-enumerates the bridge when it has gone quiet.
+
+Exit codes: 0 ok, 1 error, 2 display not found, 3 write unverified, 4 USB bridge not found,
+5 USB bridge busy (another client, typically a browser's WebUSB client, holds it exclusively),
+6 controller unreachable (`controller` commands).
 
 Hardware checks are manual and live in `docs/HARDWARE-CHECKLIST.md`.
+
+## Hardware rules
+
+The only writes in this codebase are the two `LGDualUpCommand` cases. Adding one needs a verified
+fact in `docs/BRIEF.md` first. Never 0xF4 on source 0x50, never 0x60, no probing, no scanning.
+Every write is verified by a video-cable read. See `CLAUDE.md` and `docs/DESIGN.md`.
 
 ## Licence
 

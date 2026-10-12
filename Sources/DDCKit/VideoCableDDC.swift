@@ -45,9 +45,9 @@ public actor VideoCableDDC: DDCTransport {
         throw lastError
     }
 
-    /// Sends `84 03 code hi lo chk` on the write's source. Required by `DDCTransport`; nothing
-    /// outside tests constructs a `VCPWrite` until `Devices.LGDualUp` gains its whitelist in
-    /// tracer bullet 2. Never report success from this call: verify with `read(code:)`.
+    /// Sends `84 03 code hi lo chk` on the write's source. The only production caller is
+    /// `Devices.LGDualUp.perform`, with a write from the `LGDualUpCommand` whitelist. Never
+    /// report success from this call: verify with `read(code:)`.
     public func write(_ write: VCPWrite) async throws {
         let service = try IOAVServices.resolve(nameContains: displayNameContains).service
         try service.writeI2C(chip: DDCPacket.i2cAddress, source: write.source.rawValue, bytes: DDCPacket.vcpSet(write))

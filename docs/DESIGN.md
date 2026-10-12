@@ -80,7 +80,13 @@ Devices, DDCKit -> SwitchboardCore   (PBPState, MainInput)
 `SwitchboardCore` has no dependencies and no I/O. Nothing depends on an executable.
 
 Until `LocalAPI` exists (tracer bullet 5), `switchboardctl` links `Devices` and `DDCKit`
-directly for `monitor list` and `monitor read`; from tracer bullet 5 on it talks to the API.
+directly for `monitor list`, `monitor read`, `monitor pbp on|off` and `monitor bridge list|reset`;
+from tracer bullet 5 on it talks to the API.
+
+`switchboardctl` exit codes: 0 ok, 1 error, 2 display not found (`DDCError.displayNotFound`),
+3 write unverified (`WriteOutcome.verified == false`), 4 USB bridge not found
+(`DDCError.bridgeNotFound`), 5 USB bridge busy (`DDCError.bridgeBusy`). `--dry-run` on
+`monitor pbp` prints the bytes from `Devices.DryRunFormatter` and constructs no transport.
 
 ## Concurrency
 
@@ -171,9 +177,16 @@ public protocol DDCTransport: Sendable {
 
 public actor VideoCableDDC: DDCTransport   // IOAVService; selected by EDID name, re-resolved on every call
 public actor LGUSBBridge: DDCTransport     // IOHIDManager; write-only; paired to the display by EDID serial
+public actor UnavailableTransport: DDCTransport   // placeholder; write throws bridgeNotFound(reason), read throws readUnsupported
 public actor FakeDDC: DDCTransport         // records writes, serves scripted reads, for tests
 
-public enum DDCError: Error { displayNotFound(String), ioKit(Int32, operation: String), invalidReply([UInt8]), readUnsupported, noReply, invalidEDID(String) }
+public enum DDCError: Error {
+    displayNotFound(String), ioKit(Int32, operation: String), invalidReply([UInt8]), readUnsupported, noReply, invalidEDID(String),
+    bridgeNotFound(String),        // no LG bridge, or none pairs with the display; description appends DDCError.bridgeHint
+    bridgeBusy(String),            // IOHIDDeviceOpen returned kIOReturnExclusiveAccess; detail names the likely holder
+    unsupportedSource(DDCSource)   // LGUSBBridge refuses anything but source 0x51 before it reaches the wire
+}
+public static let DDCError.bridgeHint: String   // "is the DualUp's USB upstream on the Studio and selected in the OSD? Try `switchboardctl monitor bridge reset`."
 
 /// Pure EDID parsing (unit-tested with a synthetic 128-byte EDID): name from descriptor 0xFC,
 /// numeric serial from bytes 12-15 little-endian, serial string from descriptor 0xFF, PNP id, product code.
@@ -187,31 +200,111 @@ retries up to 3 times with `Timing.readRetryGap`. `DDCKit.StableReader.read(code
 implements settle-and-double-dump: two passes `Timing.betweenDumps` apart, keep only
 codes that agree, up to 4 attempts. An unreadable code is `nil`, never "changed".
 
+### LGUSBBridge (tracer bullet 2, final)
+
+```swift
+public actor LGUSBBridge: DDCTransport {
+    public static let vendorID = 0x043E, productID = 0x9A39, usagePage = 0xFF00
+    public static let productString = "LG Monitor Controls"
+    public static let reportID: UInt8 = 0x08           // buf[0] of the framing; hidapi sends it as the report id
+    public static let minimumOutputReportSize = 63     // the interface that carries the 64-byte framing
+    public static let exclusiveAccess: Int32           // kIOReturnExclusiveAccess, 0xE00002C5
+    public nonisolated let name: String                // "USB bridge (SDQHD)"
+    public init(displayNameContains: String = "SDQHD")                               // IOHIDManager + IOAVService
+    package init(displayNameContains: String, provider: any HIDDeviceProvider, resolveDisplay: DisplayResolver)   // tests
+    public static func listDevices() throws -> [BridgeDevice]
+    public func device() throws -> BridgeDevice        // what a write would use, without opening it
+    public func write(_ write: VCPWrite) async throws  // open, SetReport(output, 8, 64) x2, close; no run loop, no reply
+    public func read(code: UInt8) async throws -> VCPReply   // always throws readUnsupported
+}
+
+public struct BridgeDevice: Sendable, Equatable, Hashable { vendorID, productID: Int; product, serial: String?; usagePage, maxOutputReportSize: Int }
+
+public enum BridgePairing {   // pure, unit-tested
+    static func matches(hidSerial: String?, display: ExternalDisplay) -> Bool
+    static func choose(among devices: [BridgeDevice], display: ExternalDisplay?) throws -> Int
+}
+
+public enum USBReenumerator { static func reenumerateLGBridge() throws -> Int }   // wraps C usb_reenumerate_devices(0x043E, 0x9A39)
+
+package protocol HIDReportSink: AnyObject { var device: BridgeDevice; func open() -> Int32; func setOutputReport(id: UInt8, _ bytes: [UInt8]) -> Int32; func close() -> Int32 }
+package protocol HIDDeviceProvider { func matchingDevices() throws -> [any HIDReportSink] }
+```
+
+Send sequence, exactly the prototype's verified `uset` path: `IOHIDDeviceOpen(kIOHIDOptionsTypeNone)`,
+`IOHIDDeviceSetReport(kIOHIDReportTypeOutput, 8, first, 64)`, the same for the follow-up report
+from `DDCPacket.usbBridgeReports(set:value:)`, `IOHIDDeviceClose`. The bridge never answers;
+the caller verifies over the video cable. Enumeration mirrors `lgusb.m`: `IOHIDManagerSetDeviceMatching`
+on vendor and product, `IOHIDManagerOpen` (non-exclusive, the verified sequence), `IOHIDManagerCopyDevices`;
+the manager is closed when the last device taken from it is released.
+
+Pairing rule (`BridgePairing.matches`): the HID serial (`kIOHIDSerialNumberKey`) equals the EDID
+serial string (descriptor 0xFF, case-insensitive, trimmed) or the numeric EDID serial rendered as
+decimal or as hex (with or without `0x`). Selection (`BridgePairing.choose`): keep product 0x9A39
+on usage page 0xFF00; with a resolved display keep only paired interfaces; without one (video
+cable missing) accept the bridge only if every candidate carries the same serial and otherwise
+throw `bridgeNotFound` saying there is more than one; prefer `maxOutputReportSize >= 63`.
+`IOHIDDeviceOpen` returning `kIOReturnExclusiveAccess` maps to `bridgeBusy` naming a browser's
+WebUSB client (Arc) and LG OnScreen Control as the likely holders. The IOKit calls sit behind
+`HIDReportSink`/`HIDDeviceProvider` (`package` access) so the actor's device choice, pairing,
+report sequence and error mapping are unit-tested with a fake; `IOHIDBridgeProvider` /
+`IOHIDReportSink` are the thin adapters, one IOKit call per method, returning the raw `IOReturn`.
+
+`USBReenumerate` (C target, from `usbreset.c`): `int usb_reenumerate_devices(uint16_t vendor_id,
+uint16_t product_id_or_zero)` opens each matching `IOUSBHostDevice` through the IOUSBLib plug-in
+and calls `USBDeviceReEnumerate`. Returns the count re-enumerated; -1 when service matching
+failed, -2 when devices matched but none could be opened. The Swift wrapper throws
+`DDCError.ioKit` for negative results and returns 0 when nothing matched.
+
 ## Devices.LGDualUp
 
 ```swift
+public enum LGDualUpTransport: String, Sendable, Codable, CaseIterable { case usbBridge, videoCable }
+
 public enum LGDualUpCommand: String, CaseIterable, Sendable, Codable {
     case pbpOn      // USB bridge only, 0xD7 = 0, expect read-back 0 on the video cable
     case pbpOff     // video cable only, 0xD7 = 1, expect read-back 1
+    var code: UInt8 { 0xD7 }                 var value: UInt16 { 0 / 1 }
+    var transport: LGDualUpTransport         var expectedReadBack: UInt16 { value }
+    var targetState: PBPState { .on / .off }
+    package var write: VCPWrite              // VCPWrite(code, value, .standard); the only VCPWrite construction in the package
 }
-public struct WriteOutcome: Sendable, Equatable { command, transport: String, expected: UInt16, observed: UInt16?, verified: Bool }
-public enum DualUpCode { static let pbp: UInt8 = 0xD7; static let mainInput: UInt8 = 0xF5 }
-public struct DualUpReading: Sendable, Equatable { pbp: PBPState, mainInput: MainInput, raw: [UInt8: UInt16] }
+public struct WriteOutcome: Sendable, Equatable, Codable {
+    command: LGDualUpCommand, transport: String, expected: UInt16, observed: UInt16?, verified: Bool, reading: DualUpReading
+}   // observed encodes as an explicit JSON null when unreadable
+public enum DualUpCode { static let pbp: UInt8 = 0xD7; static let mainInput: UInt8 = 0xF5; static let stateCodes = [pbp, mainInput] }
+public struct DualUpReading: Sendable, Equatable, Codable { pbp: PBPState, mainInput: MainInput, raw: [UInt8: UInt16] }
+    // JSON: {"pbp": "off", "mainInput": "hdmi1", "raw": {"0xD7": 1, "0xF5": 1}}; pbp/mainInput re-derived from raw on decode
+public enum DryRunFormatter { static func lines(for: LGDualUpCommand, displayNameContains: String) -> [String] }   // bytes only, no I/O
 public actor LGDualUp {
+    nonisolated let videoCable: any DDCTransport
+    nonisolated let usbBridge: any DDCTransport
     init(videoCable: any DDCTransport, usbBridge: any DDCTransport, sleep: @escaping Sleeper = Timing.realSleep)
+    init(videoCable: any DDCTransport, sleep: @escaping Sleeper = Timing.realSleep)   // usbBridge = UnavailableTransport: pbpOn throws bridgeNotFound
     func perform(_ command: LGDualUpCommand) async throws -> WriteOutcome   // write, settle, double-read 0xD7, compare
     func readState() async -> DualUpReading   // 0xD7 and 0xF5 via StableReader; never throws, unreadable = .unknown
 }
 ```
 
-Tracer bullet 1 ships `init(videoCable:sleep:)` and `readState()`; `usbBridge`,
-`LGDualUpCommand`, `WriteOutcome` and `perform` arrive with the whitelist in tracer bullet 2.
 `readState` does not throw: a code that cannot be read stably is `.unknown` and absent from
 `raw`. Whether the display is connected at all is a separate question (`VideoCableDDC.display()`
 throws `DDCError.displayNotFound`), which is how `switchboardctl` tells exit code 2 apart.
 
-`perform` never reports success from the write alone. `observed == nil` means unknown, and
-`verified == false`; the caller surfaces that as "unverified", not as failure of the monitor.
+`perform`: pick the transport from the command, `write(command.write)` (a write error
+propagates and nothing else happens), `await sleep(Timing.settleAfterModeChange)`, `StableReader`
+read of `DualUpCode.stateCodes` over the video cable, `observed = raw[0xD7]`,
+`verified = observed == expectedReadBack`. It never reports success from the write alone.
+`observed == nil` means unknown, and `verified == false`; the caller surfaces that as
+"unverified" (exit 3), not as failure of the monitor.
+
+Deviations from the first draft of this file, recorded in tracer bullet 2: `WriteOutcome`
+gained `reading` (the full post-write read, so callers refresh state without a second read);
+`DualUpReading` and `WriteOutcome` are `Codable` with hand-written `raw` and `observed`
+encodings; `LGDualUpTransport`, `targetState` and `DryRunFormatter` were added; `DDCError`
+gained `unsupportedSource` alongside the planned `bridgeNotFound` and `bridgeBusy`, so the
+bridge refuses a source 0x50 packet rather than encoding one; `switchboardctl` gained exit
+code 5 (bridge busy) on top of the planned 3 and 4; `LGDualUp.videoCable`/`usbBridge` are
+`nonisolated let`.
 
 ## ESP32Kit and TinyHTTP (tracer bullet 6)
 
@@ -335,7 +428,10 @@ token (it is OS-mediated and only reaches the app).
 ## Hardware rules for anyone, human or agent, working in this repository
 
 1. The only hardware writes in the codebase are the two `LGDualUpCommand` cases. Adding a
-   case needs a verified fact in `docs/BRIEF.md` first.
+   case needs a verified fact in `docs/BRIEF.md` first. Mechanically: `VCPWrite.init` is
+   `package`, the only production construction is `LGDualUpCommand.write`, and the only
+   production caller of `DDCTransport.write` is `LGDualUp.perform`. `grep -rn "VCPWrite(" Sources/`
+   should keep returning that one line (plus the `description` string).
 2. Never write 0xF4 on source 0x50. Never write 0x60. Never scan or probe.
 3. Tests never touch hardware: `swift test` runs against `FakeDDC` and `MockESP32` only.
 4. Verify after every write with a video-cable read and surface the result.
