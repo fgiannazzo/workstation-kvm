@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+	<head lang="en">
+		<meta charset="utf-8" />
+		<title>Switchboard: State</title>
+		<!-- sdpi-components v4 is vendored next to this file so the inspector never loads anything from the network. -->
+		<script src="sdpi-components.js"></script>
+	</head>
+
+	<body>
+		<sdpi-item label="Field">
+			<sdpi-select setting="field" default="pbp">
+				<option value="pbp">PBP (on / off)</option>
+				<option value="mainInput">Main input (hdmi1 / hdmi2)</option>
+				<option value="usbPort">USB port (1-4)</option>
+				<option value="controllerReachable">Controller reachable (true / false)</option>
+				<option value="hdmiInput.dualup">HDMI input: DualUp</option>
+				<option value="hdmiInput.lg4k">HDMI input: LG 4K</option>
+				<option value="hdmiInput.samsung">HDMI input: Samsung</option>
+			</sdpi-select>
+		</sdpi-item>
+
+		<sdpi-item label="Labels">
+			<sdpi-textarea
+				setting="labels"
+				rows="3"
+				placeholder='Optional JSON, value to title: {"on": "PBP ON", "off": "PBP OFF"}'
+			></sdpi-textarea>
+		</sdpi-item>
+
+		<div id="switchboard-connection"></div>
+		<script src="connection.js"></script>
+	</body>
+</html>

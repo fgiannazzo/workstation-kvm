@@ -106,3 +106,7 @@ Every write is verified by a video-cable read. See `CLAUDE.md` and `docs/DESIGN.
 ## Licence
 
 MIT, see `LICENSE`.
+
+## Stream Deck plugin
+
+`StreamDeckPlugin/` holds the official Stream Deck plugin (TypeScript, Elgato SDK): a Run key that fires any macro or action through the local API, and a State tile that shows live state from `/events`. Build, install and troubleshooting steps are in [`docs/STREAMDECK-PLUGIN.md`](docs/STREAMDECK-PLUGIN.md).

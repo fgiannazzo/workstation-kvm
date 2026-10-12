@@ -1,0 +1,63 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+	"UUID": "io.github.fgiannazzo.switchboard",
+	"Name": "Switchboard",
+	"Version": "0.1.0.0",
+	"Author": "Felipe Giannazzo",
+	"Description": "Runs Switchboard macros and actions from Stream Deck keys and shows the live desk state (PBP, inputs, USB) on tiles. Talks to the Switchboard menu bar app's local API.",
+	"URL": "https://github.com/fgiannazzo/workstation-kvm",
+	"Category": "Switchboard",
+	"CategoryIcon": "imgs/plugin/category-icon",
+	"Icon": "imgs/plugin/marketplace",
+	"CodePath": "bin/plugin.js",
+	"SDKVersion": 3,
+	"Software": {
+		"MinimumVersion": "7.1"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "15.0"
+		}
+	],
+	"Nodejs": {
+		"Version": "24"
+	},
+	"Actions": [
+		{
+			"Name": "Run",
+			"UUID": "io.github.fgiannazzo.switchboard.run",
+			"Icon": "imgs/actions/run/icon",
+			"Tooltip": "Runs a Switchboard macro or action by id (POST /run/{id}).",
+			"PropertyInspectorPath": "ui/run.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/run/key",
+					"TitleAlignment": "bottom"
+				}
+			]
+		},
+		{
+			"Name": "State",
+			"UUID": "io.github.fgiannazzo.switchboard.state",
+			"Icon": "imgs/actions/state/icon",
+			"Tooltip": "Shows one field of the Switchboard state, live from /events. Press to re-read /state.",
+			"PropertyInspectorPath": "ui/state.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": false,
+			"States": [
+				{
+					"Image": "imgs/actions/state/key",
+					"TitleAlignment": "middle",
+					"Title": "?"
+				}
+			]
+		}
+	]
+}
