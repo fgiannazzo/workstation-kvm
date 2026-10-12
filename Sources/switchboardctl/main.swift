@@ -8,7 +8,8 @@ import SwitchboardCore
 // this file only parses arguments and formats output.
 //
 // Exit codes: 0 ok, 1 error, 2 display not found, 3 write unverified, 4 USB bridge not found,
-// 5 USB bridge busy (held exclusively by another client), 6 controller unreachable.
+// 5 USB bridge busy (held exclusively by another client), 6 controller unreachable,
+// 7 a run was refused because another run is in progress.
 
 enum ExitCode {
     static let ok: Int32 = 0
@@ -18,6 +19,7 @@ enum ExitCode {
     static let bridgeNotFound: Int32 = 4
     static let bridgeBusy: Int32 = 5
     static let controllerUnreachable: Int32 = 6
+    static let busy: Int32 = 7
 }
 
 let usage = """
@@ -36,13 +38,16 @@ let usage = """
                                         and touches nothing.
       monitor bridge list               list LG USB HID bridge interfaces (vendor 0x043E)
       monitor bridge reset              re-enumerate the LG USB bridge (when it has gone quiet)
+    \(runHelp)
     \(controllerHelp)
       --help, -h, help                  this text
 
     NAME is a case-insensitive substring of the display's EDID name (default SDQHD, the DualUp).
+    run, actions, macros and settings keep settings.json and macros.json in
+    ~/Library/Application Support/Switchboard/ (env SWITCHBOARD_SUPPORT_DIR overrides it).
 
     exit codes: 0 ok, 1 error, 2 display not found, 3 write unverified, 4 USB bridge not found,
-                5 USB bridge busy, 6 controller unreachable
+                5 USB bridge busy, 6 controller unreachable, 7 another run in progress
     """
 
 struct CLIError: Error, CustomStringConvertible {
@@ -252,6 +257,14 @@ func run(_ arguments: [String]) async -> Int32 {
                 try await runMonitor(args.dropFirst())
             case "controller":
                 try await controllerCommand(args.dropFirst())
+            case "run":
+                try await runCommand(args.dropFirst())
+            case "actions":
+                try actionsCommand(args.dropFirst())
+            case "macros":
+                try await macrosCommand(args.dropFirst())
+            case "settings":
+                try await settingsCommand(args.dropFirst())
             default:
                 throw CLIError("unknown command \(command)\n\(usage)")
             }
@@ -260,7 +273,7 @@ func run(_ arguments: [String]) async -> Int32 {
         }
         return ExitCode.ok
     } catch let error as CLIError {
-        printError(error.description)
+        if !error.description.isEmpty { printError(error.description) }   // empty: already reported (`run`)
         return error.code
     } catch let error as ControllerError {
         FileHandle.standardError.write(Data("switchboardctl: \(error)\n".utf8))

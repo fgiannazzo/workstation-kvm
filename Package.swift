@@ -13,6 +13,9 @@ let package = Package(
         .library(name: "Devices", targets: ["Devices"]),
         .library(name: "TinyHTTP", targets: ["TinyHTTP"]),
         .library(name: "ESP32Kit", targets: ["ESP32Kit"]),
+        // Application layer (tracer bullet 3)
+        .library(name: "StateStore", targets: ["StateStore"]),
+        .library(name: "Actions", targets: ["Actions"]),
     ],
     targets: [
         // C: declarations of the private IOAVService entry points. The symbols are exported by IOKit.
@@ -39,7 +42,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "switchboardctl",
-            dependencies: ["Devices", "DDCKit", "SwitchboardCore", "ESP32Kit"]
+            dependencies: ["Devices", "DDCKit", "SwitchboardCore", "ESP32Kit", "Actions", "StateStore"]
         ),
         .testTarget(name: "SwitchboardCoreTests", dependencies: ["SwitchboardCore"]),
         .testTarget(name: "DDCKitTests", dependencies: ["DDCKit"]),
@@ -49,6 +52,19 @@ let package = Package(
         .target(name: "ESP32Kit", dependencies: ["TinyHTTP", "SwitchboardCore"]),
         .testTarget(name: "TinyHTTPTests", dependencies: ["TinyHTTP"]),
         .testTarget(name: "ESP32KitTests", dependencies: ["ESP32Kit", "TinyHTTP", "SwitchboardCore"]),
+        // Application layer (tracer bullet 3)
+        // Settings and the one observable model. No device dependencies.
+        .target(name: "StateStore", dependencies: ["SwitchboardCore"]),
+        // Action registry, macro model and store, macro runner, Runtime (composition root).
+        .target(
+            name: "Actions",
+            dependencies: ["SwitchboardCore", "StateStore", "Devices", "DDCKit", "ESP32Kit"]
+        ),
+        .testTarget(name: "StateStoreTests", dependencies: ["StateStore", "SwitchboardCore"]),
+        .testTarget(
+            name: "ActionsTests",
+            dependencies: ["Actions", "StateStore", "Devices", "DDCKit", "ESP32Kit", "SwitchboardCore"]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )

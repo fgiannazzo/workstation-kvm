@@ -199,3 +199,129 @@ Result 2026-10-11, **partial fail** (run by the orchestrating agent with Felipe'
   wake the Mac, run `switchboardctl monitor read`; if 0xD7 reads 0, run `switchboardctl monitor pbp off`.
   Lesson for every future check: a DDC/CI null reply (`err -3`, reply byte 2 not 0x02) from an idle
   Mac means the display is asleep; check `pmset -g log | grep "Display is turned"` first.
+
+## Check 3: macros and `switchboardctl run` against the controller mock (tracer bullet 3)
+
+This check **writes to the monitor**, with the same two writes as Check 2 (`0xD7 = 0` over the USB
+bridge, `0xD7 = 1` over the video cable), now driven by a macro. Everything on the controller side
+goes to a mock on this Mac; the real ESP32 is not involved.
+
+Known problem, GitHub issue #5: the USB bridge write does not take effect yet (Check 2, step C
+failed with `UNVERIFIED: 0xD7 read back 1 (off)`; the differential check against the prototype was
+inconclusive, so the cause is still open). Step 1 of `guest` is that same write, so until #5 is
+fixed `run guest` is **expected to fail at step 1 with `unverified`** (step D below says what that
+looks like, and it is a useful result: it shows the macro aborting before `usb.select`).
+`run solo` finishes either way, because PBP is already off.
+
+Preconditions:
+
+- Check 2 step D passed on a recent build: `monitor read` says `0xD7 PBP: 1 (off)` and
+  `0xF5 main input: 1 (HDMI 1)`.
+- The display is awake (a sleeping display answers DDC/CI with a null reply and every read looks
+  `unreadable`): wake the Mac, then `pmset -g log | grep "Display is turned"` should end with a
+  "turned on" line, and `monitor read` works.
+- Fresh build: `swift build`.
+- Two terminals. Terminal 1 is for the mock.
+
+Steps:
+
+A. No hardware: `swift run switchboardctl actions` lists the eight actions with their parameters
+   (`usb.select  USB to port  [port:int(1-4)]` and so on); `swift run switchboardctl macros` lists
+   `guest` and `solo` and creates `~/Library/Application Support/Switchboard/macros.json` on the
+   first call:
+
+   ```
+   guest  Guest  monitor.pbp.on -> usb.select port=2  (verify pbp=on usbPort=2)
+   solo   Solo  usb.select port=1 -> monitor.pbp.off  (verify pbp=off usbPort=1)
+   ```
+
+B. Terminal 1: `swift run switchboardctl controller mock --port 48700` (prints
+   `mock ESP32 listening on http://127.0.0.1:48700`, then one line per request). Terminal 2:
+
+   ```
+   swift run switchboardctl settings set controllerURL http://127.0.0.1:48700
+   swift run switchboardctl settings show
+   ```
+
+   Expected: `controllerURL = http://127.0.0.1:48700`, then the settings with that URL, the defaults
+   `displayNameContains: SDQHD`, `pollingIntervalSeconds: 30`, `localAPIPort: 48600`,
+   `launchAtLogin: false`, and the path of `settings.json`.
+
+C. Controller only, no monitor write: `swift run switchboardctl run usb.select port=2`.
+
+   Expected, exit code 0:
+
+   ```
+   started usb.select (1 step)
+   step 1/1: usb.select: port 2
+   finished usb.select: ok
+   ```
+
+   Terminal 1 shows `POST /usb/select {"port":2} -> 200`. Then `run usb.select port=1` to put the
+   mock back.
+
+D. `swift run switchboardctl run guest`.
+
+   Expected once #5 is fixed, exit code 0 after about 5 s (the 4 s settle is inside step 1):
+
+   ```
+   started guest (2 steps)
+   step 1/2: monitor.pbp.on: verified 0xD7 = 0
+   step 2/2: usb.select: port 2
+   finished guest: ok
+   ```
+
+   The OSD shows PBP on, terminal 1 shows `POST /usb/select {"port":2} -> 200`, and
+   `swift run switchboardctl controller state --url http://127.0.0.1:48700` says `usb: port 2`.
+
+   Expected while #5 is open, exit code 3:
+
+   ```
+   started guest (2 steps)
+   failed guest at step 1/2: monitor.pbp.on: unverified: 0xD7 read back 1 (off), expected 0 (on)
+   ```
+
+   and terminal 1 shows **no** request: the macro stopped at the first failing step, so `usb.select`
+   did not run. Paste this output into the pull request or into #5; it is the same failure as Check 2
+   step C seen through the macro runner.
+
+E. `swift run switchboardctl run solo`.
+
+   Expected, exit code 0, also while PBP is already off:
+
+   ```
+   started solo (2 steps)
+   step 1/2: usb.select: port 1
+   step 2/2: monitor.pbp.off: verified 0xD7 = 1
+   finished solo: ok
+   ```
+
+   Terminal 1 shows `POST /usb/select {"port":1} -> 200`. The write in step 2 is `0xD7 = 1` over the
+   video cable; with PBP already off nothing visibly changes. If #5 is fixed and step D left PBP on,
+   the OSD now shows PBP off and the Studio back at 2560 x 2880.
+
+F. The exit codes: stop the mock (Ctrl-C in terminal 1), then `swift run switchboardctl run usb.select
+   port=2; echo $?`.
+
+   Expected: `failed usb.select at step 1/1: usb.select: controller unreachable at 127.0.0.1:48700: ...`
+   and `6`. Do not run `guest` with the controller down: it checks that a controller is
+   configured, not that it answers, so step 1 would still switch PBP on before step 2 fails.
+   `swift run switchboardctl settings set controllerURL none` puts the setting back for the real board.
+
+G. Optional: `swift run switchboardctl run guest --json` (with the mock running) prints one JSON object
+   per event, in the shape of the `run` events in `docs/API.md`.
+
+What to report if it is not that:
+
+- `no controller is configured` (exit 6): step B was skipped, or `SWITCHBOARD_CONTROLLER_URL` is set
+  to something else in this shell (`settings show` prints `controller in effect` when it is).
+- `controller unreachable at 127.0.0.1:48700` (exit 6) with the mock running: paste terminal 1 and
+  `lsof -i :48700`.
+- `UNVERIFIED`-style failure in step E (`monitor.pbp.off: unverified`): paste the output and what the
+  OSD shows; this is the Check 2 step D write.
+- `verify failed: ...` after both steps finished: paste the line; it names the field and both values.
+- Exit 1 with `macros.json is not a valid macro file` or `settings.json is not a valid settings
+  file`: the message names the file, the macro and the step; paste it.
+- Anything that contradicts `docs/BRIEF.md`: stop and paste the complete output.
+
+Record the result (date, pass/fail, pasted output) in the pull request that introduced the check.

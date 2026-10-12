@@ -6,7 +6,7 @@ USB switches, and exposes every action and macro to a Stream Deck.
 
 ## Status
 
-Tracer bullets 1, 2, 6 and 7 of 7 (`docs/BRIEF.md`, section 6) are in. The hardware write path is
+Tracer bullets 1, 2, 3, 6 and 7 of 7 (`docs/BRIEF.md`, section 6) are in. The hardware write path is
 exactly two commands wide (PBP on over the USB bridge, PBP off over the video cable); the only
 network writes go to the ESP32 controller (or its mock).
 
@@ -31,10 +31,19 @@ What works today:
   memory) and `ContractTest` (the checks both this repo and the firmware repo run). The contract is
   in [`docs/ESP32-CONTRACT.md`](docs/ESP32-CONTRACT.md).
 - `switchboardctl controller ...`: talk to the controller, run the mock, run the contract test.
+- `StateStore`: `Settings` and `SettingsStore` (`settings.json`), and the `@MainActor @Observable`
+  `StateStore`: one `SwitchboardState`, a 500-entry log, and `changes`, a fan-out stream of states.
+- `Actions`: the eight actions (`monitor.pbp.on|off`, `monitor.read`, `hdmi.select|resync`,
+  `usb.select`, `delay`, `notify`) with validated parameters; the macro model and `MacroStore`
+  (`macros.json`, with `guest` and `solo` created on first use); `MacroRunner`, which runs one
+  macro or action at a time, stops at the first failing step (an unverified monitor write is a
+  failure), checks the macro's `verify` against the state and publishes `run` events; `Runtime`
+  and `StateRefresher`, the wiring the app and the API will start from.
+- `switchboardctl run|actions|macros|settings`.
 
-Next: the state store, actions and macros (tracer bullet 3, where `hdmi.*` and `usb.*` get wired
-to `ESP32Kit`), then the menu bar app and the local API. See `docs/BRIEF.md` for the specification
-and `docs/DESIGN.md` for the architecture.
+Next: the menu bar app (tracer bullet 4) and the local API with the URL scheme and Stream Deck
+wrappers (tracer bullet 5). See `docs/BRIEF.md` for the specification and `docs/DESIGN.md` for the
+architecture.
 
 ## Requirements
 
@@ -62,6 +71,12 @@ swift run switchboardctl monitor read [--display SDQHD] [--json]
 swift run switchboardctl monitor pbp on|off [--display SDQHD] [--json] [--dry-run]
 swift run switchboardctl monitor bridge list
 swift run switchboardctl monitor bridge reset
+swift run switchboardctl run guest [--json]                # a macro: PBP on, USB to port 2, then verify
+swift run switchboardctl run usb.select port=2             # a single action with its parameters
+swift run switchboardctl actions [--json]
+swift run switchboardctl macros [--json]
+swift run switchboardctl settings show [--json]
+swift run switchboardctl settings set controllerURL http://127.0.0.1:48700
 swift run switchboardctl --help
 ```
 
@@ -120,9 +135,37 @@ BetterDisplay's job, not this tool's.
 page, max output report size, serial); the serial must match the DualUp in `monitor list`.
 `monitor bridge reset` re-enumerates the bridge when it has gone quiet.
 
+`run <id> [key=value ...]` starts a macro or an action (a macro id wins when both exist; a macro
+ignores the parameters) and prints each run event as it happens, as text or, with `--json`, one JSON
+object per line (the shape of the `run` events in `docs/API.md`):
+
+```
+started guest (2 steps)
+step 1/2: monitor.pbp.on: verified 0xD7 = 0
+step 2/2: usb.select: port 2
+finished guest: ok
+```
+
+A macro runs its steps in order and stops at the first one that fails; a monitor write the
+video-cable read-back does not confirm is a failure (`failed guest at step 1/2: monitor.pbp.on:
+unverified: 0xD7 read back 1 (off), expected 0 (on)`). After the last step the macro's `verify` is
+compared with the state. A macro that needs the controller, or the monitor, fails before its first
+step when there is none, so `guest` never turns PBP on and then finds it has no USB switch to move.
+Exit codes of `run`: 0 finished, 1 failed, 3 a monitor write was not verified, 6 the controller is
+not configured or not reachable, 7 another run is in progress.
+
+The `hdmi.*` and `usb.*` actions (and so `guest` and `solo`) need a controller: set it once with
+`settings set controllerURL http://host:port` or per shell with `SWITCHBOARD_CONTROLLER_URL`
+(the environment wins). `settings.json` and `macros.json` live in
+`~/Library/Application Support/Switchboard/`; `SWITCHBOARD_SUPPORT_DIR` points the CLI somewhere
+else. `macros.json` is `{"macros": [...]}`, the same shape `GET /macros` will serve; edit it by
+hand to add macros (`docs/DESIGN.md`, "Actions", has the format). The settings are
+`controllerURL`, `displayNameContains` (default `SDQHD`), `pollingIntervalSeconds` (30),
+`localAPIPort` (48600) and `launchAtLogin` (false).
+
 Exit codes: 0 ok, 1 error, 2 display not found, 3 write unverified, 4 USB bridge not found,
 5 USB bridge busy (another client, typically a browser's WebUSB client, holds it exclusively),
-6 controller unreachable (`controller` commands).
+6 controller unreachable (`controller` and `run` commands), 7 another run in progress (`run`).
 
 Hardware checks are manual and live in `docs/HARDWARE-CHECKLIST.md`.
 
