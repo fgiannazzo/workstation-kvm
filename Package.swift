@@ -34,7 +34,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "switchboardctl",
-            dependencies: ["Devices", "DDCKit", "SwitchboardCore"]
+            dependencies: ["Devices", "DDCKit", "SwitchboardCore", "ESP32Kit"]
         ),
         .testTarget(name: "SwitchboardCoreTests", dependencies: ["SwitchboardCore"]),
         .testTarget(name: "DDCKitTests", dependencies: ["DDCKit"]),

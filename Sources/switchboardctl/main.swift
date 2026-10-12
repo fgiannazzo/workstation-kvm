@@ -1,17 +1,19 @@
 import DDCKit
 import Devices
+import ESP32Kit
 import Foundation
 import SwitchboardCore
 
 // switchboardctl: thin CLI over the Switchboard libraries. Logic lives in DDCKit and Devices;
 // this file only parses arguments and formats output.
 //
-// Exit codes: 0 ok, 1 error, 2 display not found.
+// Exit codes: 0 ok, 1 error, 2 display not found, 5 controller unreachable.
 
 enum ExitCode {
     static let ok: Int32 = 0
     static let error: Int32 = 1
     static let displayNotFound: Int32 = 2
+    static let controllerUnreachable: Int32 = 5
 }
 
 let usage = """
@@ -23,9 +25,10 @@ let usage = """
                                         read the LG DualUp's PBP (0xD7) and main input (0xF5)
                                         over the video cable; NAME is an EDID-name substring
                                         (default SDQHD)
+    \(controllerHelp)
       --help, -h, help                  this text
 
-    exit codes: 0 ok, 1 error, 2 display not found
+    exit codes: 0 ok, 1 error, 2 display not found, 5 controller unreachable
     """
 
 struct CLIError: Error, CustomStringConvertible {
@@ -165,6 +168,8 @@ func run(_ arguments: [String]) async -> Int32 {
             case nil:
                 throw CLIError("monitor needs a subcommand\n\(usage)")
             }
+        case "controller":
+            try await controllerCommand(args.dropFirst())
         default:
             throw CLIError("unknown command \(command)\n\(usage)")
         }
@@ -172,6 +177,12 @@ func run(_ arguments: [String]) async -> Int32 {
     } catch let error as CLIError {
         FileHandle.standardError.write(Data("switchboardctl: \(error.description)\n".utf8))
         return error.code
+    } catch let error as ControllerError {
+        FileHandle.standardError.write(Data("switchboardctl: \(error)\n".utf8))
+        switch error {
+        case .unreachable, .timeout: return ExitCode.controllerUnreachable
+        case .httpStatus, .invalidResponse: return ExitCode.error
+        }
     } catch {
         FileHandle.standardError.write(Data("switchboardctl: \(error)\n".utf8))
         return ExitCode.error
