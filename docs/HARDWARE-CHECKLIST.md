@@ -59,3 +59,19 @@ What to report if it is not that:
   `IOReturn` code.
 
 Record the result (date, pass/fail, pasted output) in the pull request that introduced the check.
+
+Result 2026-10-11, pass (run by the orchestrating agent with Felipe's authorisation, Xcode 27
+toolchain, PBP off in the OSD):
+
+```
+$ switchboardctl monitor list
+LG SDQHD  serial 0x0007DB2C  serial string 301NTQDF4860  GSM 0x5C5A
+LG HDR 4K  serial 0x0000F233  serial string 302NTCZ1U003  GSM 0x774F
+Odyssey G80SD  serial 0x01000E00  serial string H1AK500000  SAM 0xE031
+$ switchboardctl monitor read
+display: LG SDQHD  serial 0x0007DB2C
+0xD7 PBP: 1 (off)
+0xF5 main input: 1 (HDMI 1)
+```
+
+The read took 0.9 s end to end (two passes 0.5 s apart).
