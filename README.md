@@ -6,8 +6,9 @@ USB switches, and exposes every action and macro to a Stream Deck.
 
 ## Status
 
-Tracer bullet 2 of 7 (`docs/BRIEF.md`, section 6). The first hardware write path exists, and it
-is exactly two commands wide.
+Tracer bullets 1, 2, 6 and 7 of 7 (`docs/BRIEF.md`, section 6) are in. The hardware write path is
+exactly two commands wide (PBP on over the USB bridge, PBP off over the video cable); the only
+network writes go to the ESP32 controller (or its mock).
 
 What works today:
 
@@ -23,10 +24,17 @@ What works today:
   (0xF5).
 - `SwitchboardCore`: the shared value types (`SwitchboardState`, `ControllerState`, ...).
 - `switchboardctl monitor list|read|pbp on|pbp off|bridge list|bridge reset`.
+- `TinyHTTP`: a small HTTP/1.1 server on Network.framework with server-sent events, shared by the
+  controller mock and (later) the local API.
+- `ESP32Kit`: `ESP32Client` (the `ControllerClient` for the ESP32 contract, with a reconnecting
+  event stream), `ESP32Discovery` (mDNS `_switchboard._tcp`), `MockESP32` (the contract served from
+  memory) and `ContractTest` (the checks both this repo and the firmware repo run). The contract is
+  in [`docs/ESP32-CONTRACT.md`](docs/ESP32-CONTRACT.md).
+- `switchboardctl controller ...`: talk to the controller, run the mock, run the contract test.
 
-Next: the state store, actions and macros (tracer bullet 3), then the menu bar app, the local API,
-the ESP32 client and the Stream Deck plugin. See `docs/BRIEF.md` for the specification and
-`docs/DESIGN.md` for the architecture.
+Next: the state store, actions and macros (tracer bullet 3, where `hdmi.*` and `usb.*` get wired
+to `ESP32Kit`), then the menu bar app and the local API. See `docs/BRIEF.md` for the specification
+and `docs/DESIGN.md` for the architecture.
 
 ## Requirements
 
@@ -43,8 +51,8 @@ swift build && swift test     # or: make build && make test
 ```
 
 Tests never touch hardware: they run against `FakeDDC` and a fake HID device with the brief's
-byte vectors. `make` selects Xcode's toolchain for you when Xcode is installed but
-`xcode-select` still points at the Command Line Tools.
+byte vectors, and against `MockESP32` on loopback for everything network. `make` selects Xcode's
+toolchain for you when Xcode is installed but `xcode-select` still points at the Command Line Tools.
 
 ## Usage
 
@@ -56,6 +64,26 @@ swift run switchboardctl monitor bridge list
 swift run switchboardctl monitor bridge reset
 swift run switchboardctl --help
 ```
+
+The ESP32 controller (`docs/ESP32-CONTRACT.md`). Point the commands at it with
+`--url http://host:port`, `export SWITCHBOARD_CONTROLLER_URL=http://host:port`, or `--discover`
+(first `_switchboard._tcp` service on the LAN, `--timeout 3`); `--json` prints JSON:
+
+```bash
+swift run switchboardctl controller state
+swift run switchboardctl controller hdmi lg4k 2            # pulses the LG 4K's OREI switch
+swift run switchboardctl controller hdmi lg4k 1 --resync   # correct the assumed input, no pulse
+swift run switchboardctl controller usb 2
+swift run switchboardctl controller events                 # one line per state, until Ctrl-C
+swift run switchboardctl controller discover               # list controllers found over mDNS
+swift run switchboardctl controller contract-test          # exit 0 when every check passes
+swift run switchboardctl controller mock [--port 48700] [--host 127.0.0.1] [--advertise]
+```
+
+`controller mock` runs `MockESP32` until Ctrl-C and prints each request, so the Stream Deck plugin
+and the firmware can be developed without the board; `--advertise` publishes it over mDNS and binds
+`0.0.0.0` unless `--host` says otherwise. Against a real controller `contract-test` moves the
+LG 4K input and the USB port away and back (see the contract doc).
 
 `monitor list` prints every external display with its EDID name, numeric serial (hex), serial
 string when present, and manufacturer/product code. `monitor read` selects the display whose
@@ -93,7 +121,8 @@ page, max output report size, serial); the serial must match the DualUp in `moni
 `monitor bridge reset` re-enumerates the bridge when it has gone quiet.
 
 Exit codes: 0 ok, 1 error, 2 display not found, 3 write unverified, 4 USB bridge not found,
-5 USB bridge busy (another client, typically a browser's WebUSB client, holds it exclusively).
+5 USB bridge busy (another client, typically a browser's WebUSB client, holds it exclusively),
+6 controller unreachable (`controller` commands).
 
 Hardware checks are manual and live in `docs/HARDWARE-CHECKLIST.md`.
 

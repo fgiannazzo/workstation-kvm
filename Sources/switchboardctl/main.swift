@@ -1,5 +1,6 @@
 import DDCKit
 import Devices
+import ESP32Kit
 import Foundation
 import SwitchboardCore
 
@@ -7,7 +8,7 @@ import SwitchboardCore
 // this file only parses arguments and formats output.
 //
 // Exit codes: 0 ok, 1 error, 2 display not found, 3 write unverified, 4 USB bridge not found,
-// 5 USB bridge busy (held exclusively by another client).
+// 5 USB bridge busy (held exclusively by another client), 6 controller unreachable.
 
 enum ExitCode {
     static let ok: Int32 = 0
@@ -16,6 +17,7 @@ enum ExitCode {
     static let unverified: Int32 = 3
     static let bridgeNotFound: Int32 = 4
     static let bridgeBusy: Int32 = 5
+    static let controllerUnreachable: Int32 = 6
 }
 
 let usage = """
@@ -34,12 +36,13 @@ let usage = """
                                         and touches nothing.
       monitor bridge list               list LG USB HID bridge interfaces (vendor 0x043E)
       monitor bridge reset              re-enumerate the LG USB bridge (when it has gone quiet)
+    \(controllerHelp)
       --help, -h, help                  this text
 
     NAME is a case-insensitive substring of the display's EDID name (default SDQHD, the DualUp).
 
     exit codes: 0 ok, 1 error, 2 display not found, 3 write unverified, 4 USB bridge not found,
-                5 USB bridge busy
+                5 USB bridge busy, 6 controller unreachable
     """
 
 struct CLIError: Error, CustomStringConvertible {
@@ -247,6 +250,8 @@ func run(_ arguments: [String]) async -> Int32 {
                 print(usage)
             case "monitor":
                 try await runMonitor(args.dropFirst())
+            case "controller":
+                try await controllerCommand(args.dropFirst())
             default:
                 throw CLIError("unknown command \(command)\n\(usage)")
             }
@@ -257,6 +262,12 @@ func run(_ arguments: [String]) async -> Int32 {
     } catch let error as CLIError {
         printError(error.description)
         return error.code
+    } catch let error as ControllerError {
+        FileHandle.standardError.write(Data("switchboardctl: \(error)\n".utf8))
+        switch error {
+        case .unreachable, .timeout: return ExitCode.controllerUnreachable
+        case .httpStatus, .invalidResponse: return ExitCode.error
+        }
     } catch {
         printError("\(error)")
         return ExitCode.error

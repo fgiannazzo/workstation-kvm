@@ -306,6 +306,84 @@ bridge refuses a source 0x50 packet rather than encoding one; `switchboardctl` g
 code 5 (bridge busy) on top of the planned 3 and 4; `LGDualUp.videoCable`/`usbBridge` are
 `nonisolated let`.
 
+## ESP32Kit and TinyHTTP (tracer bullet 6)
+
+The wire contract is `docs/ESP32-CONTRACT.md`; `ControllerState` and `ControllerClient` are in
+`SwitchboardCore` as above. Final public signatures:
+
+```swift
+// TinyHTTP
+public struct BonjourService: Sendable, Equatable { var name: String; var type: String }
+public actor HTTPServer {
+    init(host: String = "127.0.0.1", port: UInt16 = 0, bonjour: BonjourService? = nil, handler: @escaping Handler)
+    // start() async throws, stop() async, port, isRunning, activeConnectionCount
+}
+// Router, HTTPRequest, HTTPResponse (.json/.text/.empty/.error/.eventStream), SSEEmitter,
+// SSEParser and SSEParser.events(from:) as in the standalone TinyHTTP package.
+
+// ESP32Kit
+public enum ControllerError: Error, Sendable, Equatable {
+    case unreachable(URL, underlying: String), httpStatus(Int, body: String), invalidResponse(String), timeout
+}   // CustomStringConvertible + LocalizedError
+
+public final class ESP32Client: ControllerClient, Sendable {
+    public struct Backoff: Sendable, Equatable { var initial: Duration; var maximum: Duration; static let `default` }  // 1 s ... 30 s
+    public let baseURL: URL
+    public init(baseURL: URL, session: URLSession = .shared, timeout: Duration = .seconds(3), eventsBackoff: Backoff = .default)
+    // state(), selectHDMI(_:input:), resyncHDMI(_:input:), selectUSB(port:), events() -> AsyncStream<ControllerState>
+}
+
+public struct DiscoveredController: Sendable, Equatable, Hashable { name: String; host: String; port: UInt16; url: URL }
+public enum ESP32Discovery {
+    static let serviceType = "_switchboard._tcp"
+    static func browse(timeout: Duration) async -> [DiscoveredController]
+    static func first(timeout: Duration) async -> DiscoveredController?
+    static func resolve(_ endpoint: NWEndpoint, timeout: Duration = .seconds(3)) async -> (host: String, port: UInt16)?
+    static func url(host: String, port: UInt16) -> URL?
+}
+
+public actor MockESP32 {
+    public struct LoggedRequest: Sendable, Equatable { date: Date; method: String; path: String; body: String; status: Int }
+    public init(host: String = "127.0.0.1", port: UInt16 = 0, initialState: ControllerState? = nil,
+                pulseDelay: Duration = .zero, keepaliveInterval: Duration = .seconds(15),
+                bonjour: Bool = false, bonjourName: String = "Switchboard Mock",
+                now: @escaping @Sendable () -> Date = { Date() },
+                onRequest: (@Sendable (LoggedRequest) -> Void)? = nil)
+    // start() async throws, stop() async, port, url
+    // test hooks: failNextRequest(status:), setState(_:), currentState, requestLog, eventSubscriberCount
+}
+
+public struct ContractCheck: Sendable, Equatable { name: String; passed: Bool; detail: String }
+public struct ContractTest: Sendable { public init(baseURL: URL); public func run() async -> [ContractCheck] }
+```
+
+Behaviour worth knowing before building on it:
+
+- `ESP32Client` gives every request one `timeout` deadline (`ControllerError.timeout`). `events()`
+  ends only when the consumer stops iterating; a dropped or refused connection is retried with the
+  backoff, which resets once a connection delivered a state. The event name is ignored: any event
+  whose data decodes as `ControllerState` counts. Cancellation surfaces as `CancellationError`, never
+  as a `ControllerError`.
+- `ESP32Client` does not validate arguments (it will send `input: 3`); the controller's 400 comes
+  back as `ControllerError.httpStatus(400, body:)`. Callers that want a friendlier message check
+  first. `switchboardctl` does.
+- `MockESP32.start()` after `stop()` comes back on the same port with the same state, which is what
+  makes reconnect tests (and a "controller rebooted" demo) possible. A select or resync that does
+  not change the value publishes no event; `setState` always does.
+- The mock sends `event: state` on `/events`. Uptime is `now - start`, so tests that compare whole
+  states inject `now:`.
+- `ESP32Discovery` never throws and never hangs: it returns what it found when `timeout` passes,
+  and an empty list if the browser cannot run (for example without the Local Network permission). It
+  resolves over IPv4, since an ESP32 on a home LAN normally has no other address.
+- `ContractTest` talks raw HTTP (it does not use `ESP32Client`), so it can send what the typed
+  client cannot, such as an unknown display. On a real controller its `select` and `usb/select`
+  checks move hardware; see `docs/ESP32-CONTRACT.md`.
+- `switchboardctl controller ...` talks to the controller directly, also after tracer bullet 5:
+  it diagnoses the board itself, which the app's local API does not expose. The commands live in
+  `Sources/switchboardctl/Controller.swift`; `main.swift` only dispatches to them.
+- The `hdmi.*` and `usb.*` actions are not wired in tracer bullet 6: the action registry does not
+  exist yet. Tracer bullet 3 adds them on top of `ControllerClient` as described under Actions.
+
 ## Actions
 
 Action ids (strings, stable, used by the API and the Stream Deck):

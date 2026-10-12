@@ -11,6 +11,8 @@ let package = Package(
         .library(name: "SwitchboardCore", targets: ["SwitchboardCore"]),
         .library(name: "DDCKit", targets: ["DDCKit"]),
         .library(name: "Devices", targets: ["Devices"]),
+        .library(name: "TinyHTTP", targets: ["TinyHTTP"]),
+        .library(name: "ESP32Kit", targets: ["ESP32Kit"]),
     ],
     targets: [
         // C: declarations of the private IOAVService entry points. The symbols are exported by IOKit.
@@ -37,11 +39,16 @@ let package = Package(
         ),
         .executableTarget(
             name: "switchboardctl",
-            dependencies: ["Devices", "DDCKit", "SwitchboardCore"]
+            dependencies: ["Devices", "DDCKit", "SwitchboardCore", "ESP32Kit"]
         ),
         .testTarget(name: "SwitchboardCoreTests", dependencies: ["SwitchboardCore"]),
         .testTarget(name: "DDCKitTests", dependencies: ["DDCKit"]),
         .testTarget(name: "DevicesTests", dependencies: ["Devices", "DDCKit", "SwitchboardCore"]),
+        // Networking (tracer bullet 6)
+        .target(name: "TinyHTTP"),
+        .target(name: "ESP32Kit", dependencies: ["TinyHTTP", "SwitchboardCore"]),
+        .testTarget(name: "TinyHTTPTests", dependencies: ["TinyHTTP"]),
+        .testTarget(name: "ESP32KitTests", dependencies: ["ESP32Kit", "TinyHTTP", "SwitchboardCore"]),
     ],
     swiftLanguageModes: [.v6]
 )
