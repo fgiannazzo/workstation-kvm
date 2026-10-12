@@ -325,3 +325,135 @@ What to report if it is not that:
 - Anything that contradicts `docs/BRIEF.md`: stop and paste the complete output.
 
 Record the result (date, pass/fail, pasted output) in the pull request that introduced the check.
+
+## Check 4: the menu bar app (tracer bullet 4)
+
+Starting the app **reads** the monitor (DDC reads on the video cable, then every 30 s) and nothing
+else. Steps A to F and the unknown-URL part of step G write nothing. The only monitor writes are in
+step G (`solo`: `0xD7 = 1` over the video cable, which changes nothing while PBP is already off) and
+in the optional step H (`PBP on`: `0xD7 = 0` over the USB bridge, the same write as Check 2 step C).
+The controller side goes to the mock from Check 3; the real ESP32 is not involved.
+
+Known problem, GitHub issue #5: the USB bridge write does not take effect yet. **PBP on depends on
+it**: the `PBP on` button and the `guest` macro are expected to end `unverified` (step H says what
+that looks like in the app) until #5 is fixed. Nothing in this check needs PBP on to work.
+
+Preconditions:
+
+- Check 2 step D and Check 3 passed on a recent build: `swift run switchboardctl monitor read` says
+  `0xD7 PBP: 1 (off)` and `0xF5 main input: 1 (HDMI 1)`.
+- The display is awake (a sleeping display answers DDC/CI with a null reply and every read looks
+  `unreadable`); PBP is off in the OSD.
+- `settings.json` has no `controllerURL` (`swift run switchboardctl settings set controllerURL none`)
+  and `SWITCHBOARD_CONTROLLER_URL` is not set in the shell that launches the app, so step B starts from
+  "no controller". Back up `~/Library/Application Support/Switchboard/` first if its macros matter.
+- Two terminals: terminal 1 stays free for the mock (step D).
+
+Steps:
+
+A. Build and launch: `make app`, then `make run-app` (or `open dist/Switchboard.app`).
+
+   Expected: `make app` ends by printing `.../dist/Switchboard.app`. A glyph appears in the menu bar
+   within a couple of seconds; no Dock icon and no window. It starts as the dashed question mark, dimmed,
+   and settles to the plain `rectangle` (PBP off) after the first poll, about a second later. If the
+   glyph is missing, check `pgrep -x SwitchboardApp` and paste the output of
+   `log show --last 2m --predicate 'subsystem == "io.github.fgiannazzo.switchboard"' --info`.
+
+B. Click the glyph. The State section shows:
+
+   ```
+   PBP          Off
+   Main input   HDMI 1
+   USB port     Unknown
+   DualUp       Unknown      (no controller, so no assumed input)
+   LG 4K        Unknown
+   Samsung      Unknown
+   ```
+
+   a green dot for DualUp, a grey one for "Controller (not set)", no error, and `Updated just now`
+   (then `5 s ago`, ... as time passes). The USB and HDMI controls are greyed out with a line saying to
+   set the controller address in Settings.
+
+   Press **Read monitor**. Expected: the Run row says `Finished monitor.read`, `Updated just now`
+   resets, nothing else changes. A red `monitor.read: the monitor did not answer on the video cable`
+   means the display is asleep or not found: wake it and press the button again.
+
+C. **Settings...** opens a window. Set `Polling interval` to `10` and press **Save**.
+
+   Expected: `Saved`, and `swift run switchboardctl settings show` prints `pollingIntervalSeconds: 10`.
+   Close and reopen the window: the value is still there. Try `0` as the interval: Save refuses with
+   `pollingIntervalSeconds must be a number from 1 to 3600, got "0"` and the file keeps `10`. Put it back
+   to `30` and Save. **Reveal in Finder** shows the folder with `settings.json` and `macros.json`;
+   **Discover** with no controller on the network says `No controller answered over mDNS` after about 3 s
+   (macOS asks for Local Network access the first time: allow it).
+
+D. Start the mock in terminal 1: `swift run switchboardctl controller mock --port 48700`. In Settings set
+   the controller address to `http://127.0.0.1:48700` and Save.
+
+   Expected: within a second the Controller dot turns green and its note disappears; USB port shows
+   `Port 1`; each display shows `HDMI 1 (assumed)`; the USB and HDMI segmented controls light up with the
+   current values selected. `settings show` prints the address. Then in the HDMI row of the LG 4K open
+   **Actually on...** and choose `Actually on HDMI 2`: terminal 1 shows `POST /hdmi/lg4k/resync
+   {"input":2} -> 200`, the row now says `HDMI 2 (assumed)`, and nothing was pulsed (there is no
+   `/hdmi/lg4k/select` line). Choose `Actually on HDMI 1` to put it back.
+
+E. **Macros...**: press `+`, set the id to `check4` and the name to `Check 4`, press **Add step** and
+   choose `Wait` (set `ms` to `100`), then press **Save**.
+
+   Expected: `Saved to macros.json`. In a terminal, `swift run switchboardctl macros` lists
+   `check4  Check 4  delay ms=100` below `guest` and `solo`. In the popover a **Check 4** button
+   appeared; press it: the Run row says `Finished check4`. Back in the editor, try an empty id, a
+   duplicate id and a `Wait` of `70000`: each is listed in red and Save stays disabled. Select `check4`,
+   press `-`, Save: `switchboardctl macros` no longer lists it.
+
+F. Launch at login. In Settings turn **Launch at login** on.
+
+   Expected: **System Settings > General > Login Items & Extensions** lists **Switchboard** (macOS may show
+   a "Switchboard added items that can run in the background" notification). If the Settings window says to
+   approve Switchboard, approve it there; the toggle stays on. `swift run switchboardctl settings show`
+   prints `launchAtLogin: true`. Turn it off again: the entry is gone and the file says `false`. (If the
+   toggle says `launch at login only works from the app bundle`, the app was started from `swift run`
+   instead of `dist/Switchboard.app`.)
+
+G. The URL scheme. With the mock running and the controller set (step D):
+
+   ```
+   open "switchboard://run/solo"
+   ```
+
+   Expected: no window opens; within about 1 s the Run row says `Finished solo`; terminal 1 shows
+   `POST /usb/select {"port":1} -> 200`; PBP stays Off in the State section and the OSD (step 2 of `solo`
+   writes `0xD7 = 1` over the video cable, which changes nothing while PBP is off). Then
+   `open "switchboard://run/nope"` and `open "switchboard://state"`: each posts a notification
+   (`nope did not run: unknown action or macro "nope"` and `Cannot open switchboard://state: ...`) and
+   nothing else happens (macOS asks for notification permission the first time; if you decline, the same
+   lines appear in the Log window instead). Finally stop the mock (Ctrl-C), set the controller address to
+   empty in Settings (Save) and `open "switchboard://run/solo"` again: the run fails before its first step,
+   so the monitor is untouched. Expected: the Run row says `Failed solo: usb.select: no controller is
+   configured: ...`, the glyph turns red, and a notification repeats it (`solo did not run: ...`).
+
+H. Optional, **writes to the monitor** (the Check 2 step C write). With the mock running and the controller
+   set, press **PBP on**. Expected while #5 is open: after about 5 s the Run row turns red with
+   `Failed monitor.pbp.on: monitor.pbp.on: unverified: 0xD7 read back 1 (off), expected 0 (on)`, the glyph
+   turns red, `PBP` still reads Off. Press **Solo** (or any run that finishes) to clear the red. Once #5 is
+   fixed the same press ends `Finished monitor.pbp.on`, the glyph is `rectangle.split.1x2` and the OSD
+   shows PBP on; **PBP off** puts it back.
+
+I. **Log...** shows the lines of the steps above, newest first; `Warning and above` filters; **Copy all**
+   puts the whole log on the pasteboard (paste it somewhere to check). **Quit** removes the glyph:
+   `pgrep -x SwitchboardApp` prints nothing.
+
+What to report if it is not that:
+
+- No glyph, or the process exits: the output of the `log show` command in step A and anything in
+  `~/Library/Logs/DiagnosticReports/` named `SwitchboardApp*`.
+- The State section stays at `Unknown` with the DualUp dot grey while `monitor read` in a terminal works:
+  paste both; the display name substring in Settings (`SDQHD`) may not match.
+- A window opens when a `switchboard://` URL arrives: paste the URL and which window it was.
+- The glyph looks wrong in the menu bar (invisible on a dark wallpaper, or red does not show): say which
+  tint (dimmed or red), the wallpaper and the menu bar's appearance.
+- Launch at login stays off with no message, or the entry never appears in System Settings: paste the
+  Log window's `launch at login` lines.
+- Anything that contradicts `docs/BRIEF.md`: stop and paste the complete output.
+
+Record the result (date, pass/fail, pasted output) in the pull request that introduced the check.

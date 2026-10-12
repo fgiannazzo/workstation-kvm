@@ -6,7 +6,7 @@ USB switches, and exposes every action and macro to a Stream Deck.
 
 ## Status
 
-Tracer bullets 1, 2, 3, 6 and 7 of 7 (`docs/BRIEF.md`, section 6) are in. The hardware write path is
+Tracer bullets 1, 2, 3, 4, 6 and 7 of 7 (`docs/BRIEF.md`, section 6) are in. The hardware write path is
 exactly two commands wide (PBP on over the USB bridge, PBP off over the video cable); the only
 network writes go to the ESP32 controller (or its mock).
 
@@ -40,10 +40,12 @@ What works today:
   failure), checks the macro's `verify` against the state and publishes `run` events; `Runtime`
   and `StateRefresher`, the wiring the app and the API will start from.
 - `switchboardctl run|actions|macros|settings`.
+- `AppCore` and `SwitchboardApp`: the menu bar app (`make app`): a status glyph, a popover with the
+  state and virtual controls, a macro editor, settings, a log, launch at login, and the
+  `switchboard://run/{id}` URL scheme. See "Menu bar app" below.
 
-Next: the menu bar app (tracer bullet 4) and the local API with the URL scheme and Stream Deck
-wrappers (tracer bullet 5). See `docs/BRIEF.md` for the specification and `docs/DESIGN.md` for the
-architecture.
+Next: the local API and the Stream Deck wrappers (tracer bullet 5). See `docs/BRIEF.md` for the
+specification and `docs/DESIGN.md` for the architecture.
 
 ## Requirements
 
@@ -62,6 +64,82 @@ swift build && swift test     # or: make build && make test
 Tests never touch hardware: they run against `FakeDDC` and a fake HID device with the brief's
 byte vectors, and against `MockESP32` on loopback for everything network. `make` selects Xcode's
 toolchain for you when Xcode is installed but `xcode-select` still points at the Command Line Tools.
+
+`make app` builds the menu bar app into `dist/Switchboard.app` (see below); `make clean` removes it.
+
+## Menu bar app
+
+```bash
+make app                   # release build, assembled and ad-hoc signed: dist/Switchboard.app
+make run-app               # or: open dist/Switchboard.app
+```
+
+Switchboard shows up as a glyph in the menu bar: no Dock icon, no window at launch. The glyph is the
+monitor's state: `rectangle.split.1x2` for PBP on, `rectangle` for PBP off, `questionmark.square.dashed`
+for unknown. It is dimmed while the DualUp does not answer on the video cable (including the first
+second after launch) and red while the last run's failure is still the last word (`lastError`).
+
+Launching only reads: the app polls the monitor over the video cable every `pollingIntervalSeconds` and,
+when a controller is configured, reads its state and listens to its events. It writes to the monitor
+or the controller only when you press a control, run a macro or open a `switchboard://` URL.
+
+Click the glyph for the popover:
+
+- **State**: PBP, main input, USB port, and for each display the input the controller assumes it is
+  on. The OREI switches cannot be read, so each assumption has an "Actually on..." menu: choose the
+  input the display is really on and the controller is told (`hdmi.resync`), without pulsing the
+  switch. Dots show whether the controller and the DualUp answer, then the last error and how long
+  ago the state was updated.
+- **Controls**: a button per macro, PBP on / PBP off / Read monitor (`monitor.pbp.on`,
+  `monitor.pbp.off`, `monitor.read`), a segmented control for the USB port (1 to 4) and one per
+  display for its HDMI input (1 or 2), and a text field with a Notify button. The USB and HDMI
+  controls need a controller (set its address in Settings). They are disabled while a run is going.
+- **Run row**: what is running (`Running guest, step 1 of 2`) with a progress bar, or how the last run
+  ended; a failure shows the step and the reason, the same text `switchboardctl run` prints.
+- **Macros...**, **Settings...**, **Log...** open their windows. **Quit** quits.
+
+Windows:
+
+- **Macros**: the macro editor. A list of macros (add, duplicate, remove, drag to reorder); for the
+  selected one its id (the `{id}` of `switchboard://run/{id}`), name, ordered steps and an optional
+  verify. Add a step by choosing an action; each step gets the controls its action's parameters
+  call for (a picker for a choice, a number with a stepper for an integer, a text field for text),
+  and moves up or down or is removed. Problems are listed in red as you type, with the same rules
+  `macros.json` is validated by; Save writes `macros.json` only when the whole list is valid.
+  `switchboardctl macros` sees the result at once.
+- **Settings**: controller address (with a Discover button that browses `_switchboard._tcp` and fills
+  the field in; macOS asks for Local Network access the first time), the display name substring that
+  finds the DualUp, the polling interval, the local API port (the API itself and its token come with
+  tracer bullet 5), launch at login, and the folder where `settings.json` and `macros.json` live, with a
+  Reveal in Finder button. Save applies the settings: a new controller address, display name or polling
+  interval rebuilds the app's wiring (the log and the last reading carry over).
+- **Log**: the app's log, newest first, with a minimum-level filter and Copy all (plain text, oldest
+  first). The same lines also go to the unified log under the subsystem `io.github.fgiannazzo.switchboard`
+  (`log stream --predicate 'subsystem == "io.github.fgiannazzo.switchboard"'`).
+
+Launch at login uses `SMAppService`, which only works from the app bundle: from `swift run` the Settings
+toggle says to open `dist/Switchboard.app`. If macOS wants approval, the toggle stays on and says to approve
+Switchboard in System Settings > General > Login Items. The toggle shows what macOS says, not what the
+file says. The first time something posts a notification (the `notify` action, or a `switchboard://` run
+that fails) macOS asks for permission; without it the text goes to the log.
+
+The URL scheme runs a macro, or an action with parameters, like `POST /run/{id}` will without a token
+(`docs/API.md`). From Terminal, or a Stream Deck "Open" key:
+
+```bash
+open "switchboard://run/solo"                 # a macro
+open "switchboard://run/usb.select?port=2"    # an action with its parameters
+```
+
+A macro id wins over an action id, and a macro ignores the query. The app is started if it is not
+running. A URL that does not parse, an unknown id, a bad parameter or a run that fails is shown as a
+notification (a run that works is quiet; the state and the glyph show the result). Only one run goes at
+a time. `solo` and `guest` need the controller like they do on the command line, and `guest` turns
+PBP on over the USB bridge, which does not take effect yet (GitHub issue #5).
+
+The app is signed ad hoc (`codesign -s -`) and never leaves your Mac: no App Store, no notarisation.
+Environment: `SWITCHBOARD_SUPPORT_DIR` points the app at another settings and macros directory and
+`SWITCHBOARD_CONTROLLER_URL` overrides the controller address, as for `switchboardctl`.
 
 ## Usage
 

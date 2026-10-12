@@ -16,6 +16,9 @@ let package = Package(
         // Application layer (tracer bullet 3)
         .library(name: "StateStore", targets: ["StateStore"]),
         .library(name: "Actions", targets: ["Actions"]),
+        // Menu bar app (tracer bullet 4)
+        .library(name: "AppCore", targets: ["AppCore"]),
+        .executable(name: "SwitchboardApp", targets: ["SwitchboardApp"]),
     ],
     targets: [
         // C: declarations of the private IOAVService entry points. The symbols are exported by IOKit.
@@ -64,6 +67,22 @@ let package = Package(
         .testTarget(
             name: "ActionsTests",
             dependencies: ["Actions", "StateStore", "Devices", "DDCKit", "ESP32Kit", "SwitchboardCore"]
+        ),
+        // Menu bar app (tracer bullet 4)
+        // Everything testable: URL scheme parsing, status glyph, run progress, the macro editor's
+        // drafts and AppModel. No SwiftUI.
+        .target(
+            name: "AppCore",
+            dependencies: ["Actions", "StateStore", "SwitchboardCore", "ESP32Kit"]
+        ),
+        // SwiftUI, thin: scenes and views over AppModel. Assembled into Switchboard.app by Scripts/make-app.sh.
+        .executableTarget(
+            name: "SwitchboardApp",
+            dependencies: ["AppCore", "Actions", "StateStore", "SwitchboardCore", "ESP32Kit"]
+        ),
+        .testTarget(
+            name: "AppCoreTests",
+            dependencies: ["AppCore", "Actions", "StateStore", "Devices", "DDCKit", "ESP32Kit", "SwitchboardCore"]
         ),
     ],
     swiftLanguageModes: [.v6]

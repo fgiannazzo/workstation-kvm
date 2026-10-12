@@ -58,19 +58,23 @@ Sources/
                         Depends on SwitchboardCore only (no devices).
   Actions/              Action registry, Macro model, MacroStore (JSON), MacroRunner, Runtime
                         (composition root) and StateRefresher (polling; the app starts it).
+  AppCore/              Everything of the menu bar app that can be tested: AppModel, the
+                        switchboard:// URL parser, status glyph, run progress, macro editor drafts.
+                        No SwiftUI.
   LocalAPI/             HTTP API, bearer auth, SSE events, Stream Deck wrapper generator.
   switchboardctl/       CLI executable.
-  SwitchboardApp/       Menu bar app executable (SwiftUI MenuBarExtra).
+  SwitchboardApp/       Menu bar app executable (SwiftUI MenuBarExtra): scenes and views only.
 Tests/
   SwitchboardCoreTests/ DDCKitTests/ DevicesTests/ TinyHTTPTests/ ESP32KitTests/
-  StateStoreTests/ ActionsTests/ LocalAPITests/
+  StateStoreTests/ ActionsTests/ AppCoreTests/ LocalAPITests/
 App/Info.plist          LSUIElement, CFBundleURLTypes for switchboard://
 Scripts/make-app.sh
 StreamDeckPlugin/       Phase 2, npm package.
 docs/                   BRIEF.md, DESIGN.md, HARDWARE-CHECKLIST.md, STREAMDECK.md, API.md
 ```
 
-Dependency direction (arrows mean "depends on"):
+Dependency direction (arrows mean "depends on"; the app's own line, from tracer bullet 4, is
+`SwitchboardApp -> AppCore -> Actions, StateStore, SwitchboardCore, ESP32Kit`):
 
 ```
 switchboardctl, SwitchboardApp -> LocalAPI -> Actions -> Devices -> DDCKit -> IOAVServiceShim
@@ -508,7 +512,8 @@ public actor MacroRunner {
 public struct Runtime: Sendable {                   // composition root
     let settings, controllerURL, dualUp, controller, store, macros, registry, context, runner, refresher
     @MainActor static func live(settings: Settings, environment: [String: String] = ProcessInfo.processInfo.environment,
-                                appSupport: URL, notify: @escaping @Sendable (String) async -> Void = { _ in }) -> Runtime
+                                appSupport: URL, notify: @escaping @Sendable (String) async -> Void = { _ in },
+                                store: StateStore = StateStore()) -> Runtime   // `store:` added in tracer bullet 4
     @MainActor init(settings:controllerURL:dualUp:controller:appSupport:notify:sleep:store:)   // fakes in tests
 }
 @MainActor public final class StateRefresher {
@@ -564,6 +569,132 @@ is `@Sendable (String) async -> Void` (not a synchronous closure) and the contex
 step instead of at the step; `usb.select`, `hdmi.select` and `hdmi.resync` verify the controller's
 reply; macro ids are restricted to letters, digits, `.`, `_` and `-` (they appear in URL paths);
 `switchboardctl` gained `SWITCHBOARD_SUPPORT_DIR` and exit code 7.
+
+## Menu bar app (tracer bullet 4, final)
+
+`SwitchboardApp` (executable) is SwiftUI and nothing else: scenes, views, the status-item image and
+an `NSApplicationDelegate` that receives `switchboard://` URLs. Every decision that is not drawing
+lives in `AppCore` and is tested (`Tests/AppCoreTests`, over `FakeDDC`, a fake controller, a fake
+notifier and a fake login item). `Scripts/make-app.sh` (`make app`) assembles `dist/Switchboard.app`
+from `.build/release/SwitchboardApp` and `App/Info.plist` and signs it ad hoc.
+
+```swift
+// AppCore
+public enum SwitchboardURL {                       // switchboard://run/{id}[?key=value&...]
+    static func parse(_ url: URL) throws -> (id: String, parameters: [String: JSONValue])
+}   // SwitchboardURLError: wrongScheme, unsupportedHost, missingID, unexpectedPath, invalidID, badParameter
+    // Structural only. An action id's query goes through ActionDescriptor.parameters(fromText:); whether the
+    // values are acceptable is the runner's call (a macro with that id would ignore them). A macro id's query
+    // stays text. A parameter without a name or a value, or given twice, is badParameter.
+
+public enum Tint { case primary, secondary, red }
+public enum StatusGlyph {
+    static func symbol(for state: SwitchboardState) -> (name: String, tint: Tint)
+}   // on rectangle.split.1x2, off rectangle, unknown questionmark.square.dashed;
+    // red when lastError is set (outranks), secondary when the DualUp is unreachable, else primary
+
+public struct RunProgress: Equatable, Sendable {   // reduces RunEvents for the run row
+    enum Outcome { case none, finished, failed }
+    private(set) var id: String?, runID: String?, isRunning: Bool, currentStep: Int, stepCount: Int
+    private(set) var lastMessage: String, lastOutcome: Outcome
+    mutating func apply(_ event: RunEvent);  mutating func reject(id: String, message: String)
+    var fraction: Double;  var statusLine: String
+}   // events of another run than the one in progress are ignored; `started` always begins a new run
+
+public struct RunOutcome: Sendable, Equatable {
+    enum Status { case finished, failed, rejected }  // rejected: never started (unknown id, bad parameter, busy)
+    var id: String, status: Status, message: String, report: RunReport?;  var succeeded: Bool
+}
+
+@MainActor @Observable public final class AppModel {
+    typealias RuntimeFactory = @MainActor (Settings, StateStore, @escaping @Sendable (String) async -> Void) -> Runtime
+    typealias Discovery = @Sendable (Duration) async -> DiscoveredController?
+    init(environment: [String: String] = ProcessInfo.processInfo.environment, supportDirectory: URL? = nil,
+         runtimeFactory: RuntimeFactory? = nil,                       // default: Runtime.live
+         notifier: any UserNotifier = SystemNotifier(), loginItem: any LaunchAtLoginService = MainAppLoginItem(),
+         discovery: @escaping Discovery = { await ESP32Discovery.first(timeout: $0) })
+
+    private(set) var runtime: Runtime, settings: Settings, macros: [Macro], macrosError: String?, startupError: String?
+    private(set) var runProgress: RunProgress, isBusy: Bool, launchAtLoginStatus: LaunchAtLoginStatus, launchAtLoginMessage: String?
+    var state: SwitchboardState { runtime.store.state }              // mirrors the store
+    var log: [LogEntry] { runtime.store.log }
+    var actions: [ActionDescriptor] { runtime.registry.descriptors }
+    var controllerURL: URL?;  var controllerURLComesFromEnvironment: Bool
+    let supportDirectory: URL, environment: [String: String]
+
+    func start() async                  // idempotent: settings.json, macros.json, refresher, services
+    func stop()                         // stops polling
+    func run(id: String, parameters: [String: JSONValue] = [:]) async -> RunOutcome      // MacroRunner.execute
+    func run(_ action: ActionID, parameters: [String: JSONValue] = [:]) async -> RunOutcome
+    func resyncHDMI(display: DisplayID, input: Int) async -> RunOutcome                  // hdmi.resync
+    func handle(url: URL) async -> RunOutcome?                       // parse + run; failures become notifications
+    func saveSettings(_ settings: Settings) async throws             // SettingsError
+    func discoverController(timeout: Duration = .seconds(3)) async -> DiscoveredController?
+    func setLaunchAtLogin(_ enabled: Bool) async -> String?          // message when something needs the user
+    func openLoginItemsSettings()
+    func reloadMacros() async;  func saveMacros(_ macros: [Macro]) async throws          // MacroStoreError
+    func notify(_ text: String) async                                // UNUserNotification, else the log
+
+    // MARK: Services
+    func startServices()    // empty: tracer bullet 5 starts the local API here
+}
+
+// Editor and window helpers (pure)
+public struct StepDraft, VerifyDraft, MacroDraft;  public enum MacroDraftSet   // text-field drafts of a Macro
+    // MacroDraft.issues(among:) uses MacroValidator.isValidID, ActionRegistry.validate and the verify ranges, plus
+    // "every parameter of the descriptor is filled in"; a list without issues is accepted by MacroStore.save.
+public struct SettingsDraft                                          // text fields -> Settings via Settings.set(_:to:)
+public enum LogPresentation, RelativeTime                            // log filter/copy text, "5 s ago"
+public protocol LaunchAtLoginService { status; register(); unregister(); openSystemSettings() }   // MainAppLoginItem = SMAppService.mainApp
+public protocol UserNotifier { func post(title: String, body: String) async -> NotificationOutcome }   // SystemNotifier
+```
+
+Behaviour worth knowing before building on it:
+
+- `init` builds a `Runtime` from default settings (no hardware is touched), `start()` loads `settings.json`
+  and rebuilds the runtime if it differs, loads `macros.json` (writing the defaults on first launch),
+  refreshes the login item status, starts the `StateRefresher` and calls `startServices()`. A
+  `settings.json` or `macros.json` that cannot be read leaves the defaults / no macros, sets
+  `startupError` / `macrosError`, logs it and is never overwritten by `start()`; the macro editor refuses to
+  save while `macrosError` is set (Reload after fixing the file by hand).
+- The `StateStore` outlives the runtime: `saveSettings` rebuilds the `Runtime` (through the factory, with the
+  same store) when `controllerURL`, `displayNameContains`, `pollingIntervalSeconds` or `localAPIPort`
+  changed, so the log and the last reading carry over. A rebuild while a run is in progress waits for
+  the run to end. **Services hook:** `startServices()` runs at the end of `start()` and again after every
+  rebuild; tracer bullet 5 must stop what it started before starting again, and must take
+  `runtime.runner`, `runtime.macros` and `runtime.registry` from `model.runtime` afresh, because a rebuild
+  replaces them. (Nothing else in the app starts a server, a token or a listener.)
+- One run at a time through the UI: `run` while `isBusy`, or while someone else's run holds the runner
+  (`ActionError.busy`), is `rejected` and leaves the progress of the run in progress alone. `runProgress`
+  is fed from the runner's events in order. A run that fails sets the store's `lastError`; a run that
+  is rejected (unknown id, bad parameter) only shows in the run row and the log.
+- `handle(url:)` awaits `start()` first, so a URL that launches the app runs after the macros are loaded. A
+  URL that does not parse, and a run that does not finish, post a notification (a run that works is
+  quiet). `SwitchboardApp` installs `NSApplicationDelegate.application(_:open:)` for the URLs, declared in
+  `App/Info.plist` (`CFBundleURLTypes`, scheme `switchboard`, role Viewer). Every scene carries
+  `.handlesExternalEvents(matching: [])`: without it SwiftUI opens one of the windows for each URL.
+- Notifications ask for permission the first time one is posted, not at launch. Outside a bundle
+  `UNUserNotificationCenter` cannot be used (it raises), so `SystemNotifier` reports `skipped` and the text goes
+  to the log; `MainAppLoginItem` reports `notInBundle` and `setLaunchAtLogin` says to run the `.app`.
+- The in-app log is also written to `os.Logger` (subsystem `io.github.fgiannazzo.switchboard`, category `app`)
+  for what `AppModel` itself does (start, settings, URLs, launch at login); the runner's own lines stay in
+  the in-app log only. There is no `log.txt` yet.
+- The launch-at-login toggle shows `SMAppService.mainApp.status` (on while approval is pending), not
+  `settings.launchAtLogin`, which only records what the system last said.
+- The status item image is a template (`primary`), a template at 45 % opacity (`secondary`) or a red
+  non-template symbol (`red`): only red is a real colour in the menu bar.
+
+Deviations from the brief and from the first draft of this file, recorded in tracer bullet 4:
+`Runtime.live` gained a `store:` parameter (default a new store) so a rebuild keeps the log; the runtime is
+rebuilt for `pollingIntervalSeconds` and `localAPIPort` too (the first because the refresher takes its
+interval at construction, the second so services restart on a port change); `AppModel.run` returns a
+`RunOutcome` rather than the runner's `RunReport` (a run that never started has no report);
+`SwitchboardURL.parse` does not validate action parameters (the runner does; see above);
+`Info.plist` has no `NSUserNotificationsUsageDescription` (macOS has no such key; permission is asked at
+first use) and does have `NSAppTransportSecurity`/`NSAllowsLocalNetworking` for the controller's plain HTTP
+and a `CFBundleIconFile` for the icon that `Scripts/make-icon.swift` draws at build time; `make run-app` opens
+an existing bundle and does not build one; the macro editor requires a non-empty name, which the store
+does not.
 
 ## LocalAPI
 

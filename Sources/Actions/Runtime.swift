@@ -73,12 +73,15 @@ public struct Runtime: Sendable {
     ///   - environment: for `SWITCHBOARD_CONTROLLER_URL`, which overrides `settings.controllerURL`.
     ///   - appSupport: where `macros.json` lives (`AppSupport.directory(environment:)`).
     ///   - notify: what the `notify` action does; the default does nothing beyond the run event.
+    ///   - store: the state and log to keep. The menu bar app passes its own when it rebuilds the
+    ///     runtime after a settings change, so the log and the last reading survive.
     @MainActor
     public static func live(
         settings: Settings,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         appSupport: URL,
-        notify: @escaping @Sendable (String) async -> Void = { _ in }
+        notify: @escaping @Sendable (String) async -> Void = { _ in },
+        store: StateStore = StateStore()
     ) -> Runtime {
         let videoCable = VideoCableDDC(displayNameContains: settings.displayNameContains)
         let usbBridge = LGUSBBridge(displayNameContains: settings.displayNameContains)
@@ -93,7 +96,8 @@ public struct Runtime: Sendable {
             dualUp: dualUp,
             controller: controller,
             appSupport: appSupport,
-            notify: notify
+            notify: notify,
+            store: store
         )
     }
 }

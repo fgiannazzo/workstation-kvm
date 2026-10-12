@@ -31,6 +31,22 @@ struct RuntimeTests {
         }
     }
 
+    @Test("live builds around the store it is given, so a rebuilt runtime keeps the log and the last reading")
+    func liveKeepsGivenStore() async throws {
+        try await withTempDirectory { directory in
+            let store = StateStore()
+            store.log(.info, "before")
+            store.applyMonitor(pbp: .on, mainInput: .hdmi2, reachable: true)
+
+            let runtime = Runtime.live(settings: Settings(), environment: [:], appSupport: directory, store: store)
+
+            #expect(runtime.store === store)
+            #expect(runtime.context.store === store)
+            #expect(runtime.store.log.map(\.message) == ["before"])
+            #expect(runtime.store.state.pbp == .on)
+        }
+    }
+
     @Test("live builds an ESP32Client for the configured controller URL")
     func liveWithController() async throws {
         try await withTempDirectory { directory in
