@@ -369,7 +369,7 @@ private func controllerMock(_ options: ControllerOptions) async throws {
     await mock.stop()
 }
 
-private func describeListenError(_ error: any Error) -> String {
+func describeListenError(_ error: any Error) -> String {
     if let network = error as? NWError, case .posix(let code) = network {
         return String(cString: strerror(code.rawValue))
     }
@@ -377,7 +377,7 @@ private func describeListenError(_ error: any Error) -> String {
 }
 
 /// Returns when the process receives SIGINT or SIGTERM, or when the calling task is cancelled.
-private func waitForInterrupt() async {
+func waitForInterrupt() async {
     signal(SIGINT, SIG_IGN)
     signal(SIGTERM, SIG_IGN)
     let (stream, continuation) = AsyncStream<Void>.makeStream()
