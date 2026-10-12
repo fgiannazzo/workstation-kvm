@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "SwitchboardCore", targets: ["SwitchboardCore"]),
         .library(name: "DDCKit", targets: ["DDCKit"]),
         .library(name: "Devices", targets: ["Devices"]),
+        .library(name: "TinyHTTP", targets: ["TinyHTTP"]),
     ],
     targets: [
         // C: declarations of the private IOAVService entry points. The symbols are exported by IOKit.
@@ -37,6 +38,9 @@ let package = Package(
         .testTarget(name: "SwitchboardCoreTests", dependencies: ["SwitchboardCore"]),
         .testTarget(name: "DDCKitTests", dependencies: ["DDCKit"]),
         .testTarget(name: "DevicesTests", dependencies: ["Devices", "DDCKit", "SwitchboardCore"]),
+        // Networking (tracer bullet 6)
+        .target(name: "TinyHTTP"),
+        .testTarget(name: "TinyHTTPTests", dependencies: ["TinyHTTP"]),
     ],
     swiftLanguageModes: [.v6]
 )
