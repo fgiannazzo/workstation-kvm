@@ -219,7 +219,7 @@ swift run switchboardctl controller contract-test --discover   # first _switchbo
 
 Output is one `PASS`/`FAIL` line per check and a summary; `--json` prints the checks as an array of
 `{name, passed, detail}`. Exit codes: 0 every check passed, 1 a check failed (or other error),
-5 the controller is unreachable.
+6 the controller is unreachable.
 
 | # | Check | What it does | Moves hardware? |
 |---|---|---|---|
