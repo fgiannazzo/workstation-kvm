@@ -711,6 +711,15 @@ The wire contract is `docs/API.md`; clients (the CLI, the generated wrappers, th
 are built against that file. `Sources/LocalAPI` depends on `TinyHTTP`, `Actions`, `StateStore` and
 `SwitchboardCore`.
 
+In the app the server lives in `AppModel` (`AppCore` depends on `LocalAPI`): `startServices()` stops
+the previous `LocalAPIServer`, reads the token through the injected `TokenStoring` (the keychain in
+the app, a `FileTokenStore` in tests), and starts a new server on `settings.localAPIPort` over the
+current `Runtime`; it runs at the end of `start()` and after every runtime rebuild, so a port change
+saved in Settings restarts the server. `apiStatus: APIStatus` (`stopped`, `starting`, `running(URL)`,
+`failed(String)`) and `apiToken` are observable for the Settings pane; `stopServices()`/`shutdown()`
+take it down and wait for the port. A failure to start (port in use, keychain denied) is shown and
+logged; the rest of the app keeps working.
+
 ```swift
 public enum SwitchboardVersion { static let current = "0.1.0" }     // the one place; GET /health, `switchboardctl --version`
 

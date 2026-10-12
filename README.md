@@ -51,10 +51,12 @@ What works today:
 - `switchboardctl state|events|token|serve|streamdeck export`; `run`, `actions` and `macros` go
   through the app when it is running and work by themselves when it is not.
 
-Next: the menu bar app starting the local API. `AppModel.startServices()` is the stub for it and
-`LocalAPIServer.start(runtime:)` is the one line that fills it; until then `switchboardctl serve`
-serves the same API. See `docs/BRIEF.md` for the specification and `docs/DESIGN.md` for the
-architecture.
+Phase 1 is complete: the menu bar app starts the local API at launch (`AppModel.startServices`),
+Settings shows the API address and token, and `switchboardctl`, the generated wrappers and the Stream
+Deck plugin all talk to that one server. Open on the hardware side: GitHub issue #5, the USB-bridge
+PBP-on write not taking effect while the prototype's identical bytes do, which needs the differential
+test repeated with the display awake (`docs/HARDWARE-CHECKLIST.md`, Check 2). See `docs/BRIEF.md` for
+the specification and `docs/DESIGN.md` for the architecture.
 
 ## Requirements
 
@@ -267,8 +269,8 @@ Hardware checks are manual and live in `docs/HARDWARE-CHECKLIST.md`.
 ## Local API
 
 The API listens on `http://127.0.0.1:48600` (the `localAPIPort` setting), loopback only. The menu bar
-app is meant to start it at launch (`LocalAPIServer.start(runtime:)`, not wired in yet); until then
-`switchboardctl serve` serves the same thing from the command line. [`docs/API.md`](docs/API.md) is
+app starts it at launch and restarts it when the port changes; Settings shows its status, address and
+token. Without the app, `switchboardctl serve` serves the same thing from the command line. [`docs/API.md`](docs/API.md) is
 the contract; the Stream Deck plugin, `switchboardctl` and the generated wrappers are all written
 against it.
 

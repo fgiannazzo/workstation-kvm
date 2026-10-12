@@ -86,11 +86,45 @@ struct SettingsView: View {
     private var apiSection: some View {
         Section {
             TextField("Port", text: $draft.localAPIPort, prompt: Text("48600"))
+            LabeledContent("Status") {
+                Text(apiStatusText)
+                    .foregroundStyle(apiStatusIsError ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                    .textSelection(.enabled)
+            }
+            if let token = model.apiToken {
+                LabeledContent("Token") {
+                    HStack {
+                        Text(token)
+                            .font(.system(.body, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                        Button("Copy") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(token, forType: .string)
+                        }
+                    }
+                }
+            }
         } header: {
             Text("Local API")
         } footer: {
-            Text("The port the local API will listen on (127.0.0.1 only). The API and its token arrive in the next release.")
+            Text("Listens on 127.0.0.1 only. Every request except /health carries the token as a bearer header; `switchboardctl token` prints the same token. The Stream Deck plugin needs the host, the port and this token. A port change applies on Save and restarts the server.")
         }
+    }
+
+    private var apiStatusText: String {
+        switch model.apiStatus {
+        case .stopped: return "stopped"
+        case .starting: return "starting…"
+        case .running(let url): return "listening on \(url.absoluteString)"
+        case .failed(let message): return "failed: \(message)"
+        }
+    }
+
+    private var apiStatusIsError: Bool {
+        if case .failed = model.apiStatus { return true }
+        return false
     }
 
     private var generalSection: some View {
