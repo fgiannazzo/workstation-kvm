@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+	<head lang="en">
+		<meta charset="utf-8" />
+		<title>Switchboard: Run</title>
+		<!-- sdpi-components v4 is vendored next to this file so the inspector never loads anything from the network. -->
+		<script src="sdpi-components.js"></script>
+	</head>
+
+	<body>
+		<sdpi-item label="From the app">
+			<sdpi-select
+				setting="id"
+				datasource="getIds"
+				hot-reload
+				show-refresh
+				loading="Asking Switchboard..."
+			></sdpi-select>
+		</sdpi-item>
+
+		<sdpi-item label="Id">
+			<sdpi-textfield setting="id" placeholder="guest, monitor.pbp.on, usb.select ..."></sdpi-textfield>
+		</sdpi-item>
+
+		<sdpi-item label="Parameters">
+			<sdpi-textarea setting="parameters" rows="3" placeholder='Optional JSON body, e.g. {"port": 2}'></sdpi-textarea>
+		</sdpi-item>
+
+		<div id="switchboard-connection"></div>
+		<script src="connection.js"></script>
+	</body>
+</html>
