@@ -21,3 +21,6 @@ StreamDeckPlugin/dist/
 # Local
 *.local.json
 .claude/settings.local.json
+
+# Agent worktrees created by the Claude desktop app
+.claude/worktrees/
