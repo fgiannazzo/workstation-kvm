@@ -1,0 +1,6 @@
+# Build output and runtime logs inside the plugin bundle
+*.sdPlugin/bin
+*.sdPlugin/logs
+
+# SDK log files written when the bundle is run outside Stream Deck
+logs/
