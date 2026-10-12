@@ -1,0 +1,23 @@
+# SwiftPM
+.build/
+.swiftpm/
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+Package.resolved
+
+# App bundle output
+dist/
+*.app
+
+# Node (Stream Deck plugin)
+node_modules/
+StreamDeckPlugin/dist/
+*.streamDeckPlugin
+
+# macOS
+.DS_Store
+
+# Local
+*.local.json
+.claude/settings.local.json
