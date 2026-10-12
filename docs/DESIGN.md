@@ -22,11 +22,11 @@ and this file gets fixed.
 
 ## Toolchain
 
-- Swift 6.4 from the Command Line Tools. **There is no Xcode on the build machine.**
+- Swift 6.4. Xcode is optional: the project must build from the Command Line Tools alone.
   Everything is SwiftPM: no `.xcodeproj`, no `xcodebuild`.
 - `// swift-tools-version: 6.0`, `platforms: [.macOS(.v15)]`, Swift 6 language mode on every target.
 - Tests use **Swift Testing** (`import Testing`, `@Test`, `#expect`). XCTest is not available
-  without Xcode; never import it.
+  without Xcode, so never import it; Swift Testing works in both setups.
 - The app bundle is assembled by `Scripts/make-app.sh` from the SwiftPM executable plus
   `App/Info.plist`, then ad-hoc signed (`codesign -s -`). `make app` wraps it.
 - No third-party dependencies in the Swift package. The Stream Deck plugin (TypeScript, in

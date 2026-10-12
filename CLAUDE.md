@@ -13,7 +13,7 @@ package layout, shared interfaces) before changing anything.
 swift build && swift test
 ```
 
-Swift 6.4, Command Line Tools only (no Xcode, no XCTest). Tests use Swift Testing.
+Swift 6.4. Must build from the Command Line Tools alone (Xcode optional, so no XCTest). Tests use Swift Testing.
 `make app` assembles `dist/Switchboard.app`.
 
 ## Rules
