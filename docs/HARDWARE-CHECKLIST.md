@@ -162,3 +162,12 @@ What to report if it is not that:
   `IOReturn` code.
 
 Record the result (date, pass/fail, pasted output) in the pull request that introduced the check.
+
+Result 2026-10-11, **partial fail** (run by the orchestrating agent with Felipe's authorisation):
+
+- Step A pass: `monitor bridge list` → `pid 0x9A39  LG Monitor Controls  usage page 0xFF00  max output report 64  serial 301NTQDF4860` (matches the EDID serial string from `monitor list`).
+- Step B pass: `monitor pbp on --dry-run` printed report 1 `08 01 55 03 07 00 03 37 51 84 03 D7 00 00 6F` and report 2 `08 02 55 04 0B 00 0B 37 51 84 03 D7 00 00 6F`, both zero padded to 64 bytes, report id 8.
+- Step C **fail**: `monitor pbp on` → both `IOHIDDeviceSetReport` calls returned success, then `UNVERIFIED: 0xD7 read back 1 (off)` (exit 3). The read-back was stable, so the monitor never started switching.
+- Differential check: seconds later the prototype `~/Code/dualup/lgusb uset 0xD7 0` sent the byte-identical first report (`08 01 55 03 07 00 03 37 51 84 03 d7 00 00 6f`) and the monitor did switch (the next read found both codes unreadable, which is the link re-training after a mode change). So the bridge is alive and the difference is in how this app drives the HID device, not in the bytes. Known differences from `lgusb.m`: the prototype registers an input-report callback, schedules the device on a run loop, and keeps the device open about 300 ms after the second report; this app opens, sends twice and closes at once. Tracked in the GitHub issue referenced from the pull request.
+- Step D pass (before the differential check): `monitor pbp off` → `verified: 0xD7 = 1 (off)`.
+- Observation to keep in mind: after the prototype's switch and a following `monitor pbp off`, DDC reads of 0xD7 and 0xF5 over the video cable kept failing for several minutes with both tools (`ddcvcp get SDQHD 0xD7` → `err -3`, reply byte 2 was not 0x02, the DDC/CI null message), while `system_profiler` showed the DualUp back at 2560 x 2880 (PBP off). The restore write was therefore reported `UNVERIFIED: 0xD7 unreadable`. Nothing was sent after that. Re-run `monitor read` after a few minutes; if it still fails, power-cycle the monitor's DDC by toggling the input in the OSD and report.
