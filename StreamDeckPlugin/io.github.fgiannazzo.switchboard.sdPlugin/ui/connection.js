@@ -10,8 +10,8 @@
 	if (!mount || typeof SDPIComponents === "undefined") return;
 
 	mount.innerHTML =
-		'<details>' +
-		'<summary>Connection</summary>' +
+		'<details style="margin-top: 12px;">' +
+		'<summary style="font: 12px/1.6 -apple-system, BlinkMacSystemFont, \'Segoe UI\', sans-serif; color: #c8c8c8; cursor: pointer; padding: 0 6px;">Connection</summary>' +
 		'<sdpi-item label="Host">' +
 		'<sdpi-textfield setting="host" global placeholder="127.0.0.1"></sdpi-textfield>' +
 		"</sdpi-item>" +
@@ -21,10 +21,10 @@
 		'<sdpi-item label="Token">' +
 		'<sdpi-password setting="token" global placeholder="switchboardctl token"></sdpi-password>' +
 		"</sdpi-item>" +
-		'<sdpi-item label="">' +
+		"<sdpi-item>" +
 		'<sdpi-button id="switchboard-test">Test connection</sdpi-button>' +
 		"</sdpi-item>" +
-		'<sdpi-item label="">' +
+		"<sdpi-item>" +
 		'<div id="switchboard-test-result" style="font-size: 11px; line-height: 1.4; opacity: 0.85; word-break: break-word;"></div>' +
 		"</sdpi-item>" +
 		"</details>";
