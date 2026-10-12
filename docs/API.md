@@ -101,22 +101,20 @@ event: state
 data: { …SwitchboardState… }
 
 event: run
-data: { "runId": "7f3c…", "id": "guest", "kind": "macro", "status": "started",
-        "step": 0, "stepCount": 2, "message": "" }
+data: {"runId":"7f3c…","id":"guest","kind":"macro","status":"started","step":0,"stepCount":2,"message":""}
 
 event: run
-data: { "runId": "7f3c…", "id": "guest", "kind": "macro", "status": "step",
-        "step": 1, "stepCount": 2, "message": "monitor.pbp.on: verified 0xD7 = 0" }
+data: {"runId":"7f3c…","id":"guest","kind":"macro","status":"step","step":1,"stepCount":2,"message":"monitor.pbp.on: verified 0xD7 = 0"}
 
 event: run
-data: { "runId": "7f3c…", "id": "guest", "kind": "macro", "status": "finished",
-        "step": 2, "stepCount": 2, "message": "ok" }
+data: {"runId":"7f3c…","id":"guest","kind":"macro","status":"finished","step":2,"stepCount":2,"message":"ok"}
 
 : keepalive
 ```
 
-`status` is `started`, `step`, `finished` or `failed`; `message` on `failed` is the error.
-A comment line `: keepalive` goes out every 15 s. A `state` event follows every change of
+Every event's `data` is one complete JSON document on a single `data:` line. `status` is
+`started`, `step`, `finished` or `failed`; `message` on `failed` is the error. A comment line
+`: keepalive` goes out every 15 s; clients may treat 45 s of silence as a dead connection. A `state` event follows every change of
 `SwitchboardState` (polls, actions, controller events). Clients reconnect with backoff
 starting at 1 s, capped at 30 s.
 
