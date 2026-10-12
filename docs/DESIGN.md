@@ -22,22 +22,22 @@ and this file gets fixed.
 
 ## Toolchain
 
-- Swift 6.4. Xcode is optional: the project must build from the Command Line Tools alone.
-  Everything is SwiftPM: no `.xcodeproj`, no `xcodebuild`.
+- Swift 6.4 with **Xcode 26 or later selected** (`xcode-select -p` prints the Xcode developer
+  directory). Everything is SwiftPM: no `.xcodeproj`, no `xcodebuild`.
+- Known toolchain bug, 2026-10-11: with only the Command Line Tools selected, SwiftPM's Swift
+  Build backend passes `-load-resolved-plugin` for the Observation and Swift macros but not for
+  `TestingMacros`, so some test targets fail with "plugin for module 'TestingMacros' not found".
+  Until Apple fixes it, build with Xcode's toolchain: `sudo xcode-select -s
+  /Applications/Xcode.app/Contents/Developer`, or per invocation
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`. `make build` and
+  `make test` set `DEVELOPER_DIR` automatically when Xcode is installed but not selected.
 - `// swift-tools-version: 6.0`, `platforms: [.macOS(.v15)]`, Swift 6 language mode on every target.
-- Tests use **Swift Testing** (`import Testing`, `@Test`, `#expect`). XCTest is not available
-  without Xcode, so never import it; Swift Testing works in both setups.
-- The Command Line Tools' SwiftPM (Swift 6.4, Swift Build backend) does not pass the Swift
-  Testing macro plugin directory to the compiler, so `@Test` fails to expand. `Package.swift`
-  locates the toolchain that is evaluating the manifest and adds
-  `-plugin-path <toolchain>/usr/lib/swift/host/plugins/testing` to the test targets. Xcode's
-  toolchain adds the same path itself; the duplicate is harmless. Remove the workaround once a
-  toolchain update makes plain `swift test` work without it.
+- Tests use **Swift Testing** (`import Testing`, `@Test`, `#expect`). Never import XCTest.
 - The app bundle is assembled by `Scripts/make-app.sh` from the SwiftPM executable plus
   `App/Info.plist`, then ad-hoc signed (`codesign -s -`). `make app` wraps it.
 - No third-party dependencies in the Swift package. The Stream Deck plugin (TypeScript, in
   `StreamDeckPlugin/`) is a separate npm package and may use the Elgato SDK.
-- Verification for every PR: `swift build && swift test`.
+- Verification for every PR: `swift build && swift test` (or `make build test`).
 
 ## Package layout
 

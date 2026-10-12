@@ -25,8 +25,11 @@ architecture.
 
 ## Requirements
 
-- Apple Silicon Mac running macOS 15 or later (built on macOS 26 with the Swift 6.4 Command Line Tools).
-- No Xcode needed; no App Store distribution (the DDC transport uses private IOKit entry points).
+- Apple Silicon Mac running macOS 15 or later (built on macOS 26 with Swift 6.4).
+- Xcode 26 or later, selected with `xcode-select` (the Command Line Tools alone hit a SwiftPM bug
+  with Swift Testing macros, see `docs/DESIGN.md`, "Toolchain"). No `.xcodeproj`: everything is
+  SwiftPM.
+- No App Store distribution (the DDC transport uses private IOKit entry points).
 
 ## Build
 
@@ -34,9 +37,9 @@ architecture.
 swift build && swift test     # or: make build && make test
 ```
 
-Tests never touch hardware: they run against `FakeDDC` with the brief's byte vectors.
-`Package.swift` adds the Swift Testing macro plugin path to the test targets because the
-Command Line Tools' SwiftPM omits it (see `docs/DESIGN.md`, "Toolchain").
+Tests never touch hardware: they run against `FakeDDC` with the brief's byte vectors. `make`
+selects Xcode's toolchain for you when Xcode is installed but `xcode-select` still points at the
+Command Line Tools.
 
 ## Usage
 
