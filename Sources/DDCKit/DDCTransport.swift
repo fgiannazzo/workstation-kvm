@@ -1,7 +1,8 @@
 /// One way to reach the display's DDC/CI endpoint. Implementations are actors.
 ///
 /// - `VideoCableDDC`: IOAVService over the video cable; reads and writes.
-/// - `LGUSBBridge` (tracer bullet 2): IOHIDManager; write-only, `read` throws `DDCError.readUnsupported`.
+/// - `LGUSBBridge`: IOHIDManager; write-only, `read` throws `DDCError.readUnsupported`.
+/// - `UnavailableTransport`: a placeholder whose writes throw `DDCError.bridgeNotFound`.
 /// - `FakeDDC`: records writes and serves scripted reads, for tests.
 public protocol DDCTransport: Sendable {
     /// Human-readable transport name for logs and `WriteOutcome`, e.g. "video cable (SDQHD)".
