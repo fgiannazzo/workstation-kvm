@@ -2,6 +2,7 @@ import DDCKit
 import Devices
 import ESP32Kit
 import Foundation
+import LocalAPI
 import SwitchboardCore
 
 // switchboardctl: thin CLI over the Switchboard libraries. Logic lives in DDCKit and Devices;
@@ -9,7 +10,8 @@ import SwitchboardCore
 //
 // Exit codes: 0 ok, 1 error, 2 display not found, 3 write unverified, 4 USB bridge not found,
 // 5 USB bridge busy (held exclusively by another client), 6 controller unreachable,
-// 7 a run was refused because another run is in progress.
+// 7 a run was refused because another run is in progress, 8 the Switchboard app is not running
+// (`state`, `events`: there is no API to ask).
 
 enum ExitCode {
     static let ok: Int32 = 0
@@ -20,6 +22,7 @@ enum ExitCode {
     static let bridgeBusy: Int32 = 5
     static let controllerUnreachable: Int32 = 6
     static let busy: Int32 = 7
+    static let appNotRunning: Int32 = 8
 }
 
 let usage = """
@@ -39,15 +42,21 @@ let usage = """
       monitor bridge list               list LG USB HID bridge interfaces (vendor 0x043E)
       monitor bridge reset              re-enumerate the LG USB bridge (when it has gone quiet)
     \(runHelp)
+    \(apiHelp)
     \(controllerHelp)
+      --version, version                print the version
       --help, -h, help                  this text
 
     NAME is a case-insensitive substring of the display's EDID name (default SDQHD, the DualUp).
     run, actions, macros and settings keep settings.json and macros.json in
     ~/Library/Application Support/Switchboard/ (env SWITCHBOARD_SUPPORT_DIR overrides it).
+    The local API listens on 127.0.0.1:<localAPIPort> (default 48600; `settings set localAPIPort N`,
+    or --port N). Its token is in the login keychain; env SWITCHBOARD_TOKEN_FILE=<path> uses a file
+    instead (development only).
 
     exit codes: 0 ok, 1 error, 2 display not found, 3 write unverified, 4 USB bridge not found,
-                5 USB bridge busy, 6 controller unreachable, 7 another run in progress
+                5 USB bridge busy, 6 controller unreachable, 7 another run in progress,
+                8 Switchboard app not running (state, events)
     """
 
 struct CLIError: Error, CustomStringConvertible {
@@ -253,6 +262,8 @@ func run(_ arguments: [String]) async -> Int32 {
             switch command {
             case "--help", "-h", "help":
                 print(usage)
+            case "--version", "version":
+                print("switchboardctl \(SwitchboardVersion.current)")
             case "monitor":
                 try await runMonitor(args.dropFirst())
             case "controller":
@@ -260,11 +271,21 @@ func run(_ arguments: [String]) async -> Int32 {
             case "run":
                 try await runCommand(args.dropFirst())
             case "actions":
-                try actionsCommand(args.dropFirst())
+                try await actionsCommand(args.dropFirst())
             case "macros":
                 try await macrosCommand(args.dropFirst())
             case "settings":
                 try await settingsCommand(args.dropFirst())
+            case "state":
+                try await stateCommand(args.dropFirst())
+            case "events":
+                try await eventsCommand(args.dropFirst())
+            case "token":
+                try tokenCommand(args.dropFirst())
+            case "serve":
+                try await serveCommand(args.dropFirst())
+            case "streamdeck":
+                try await streamdeckCommand(args.dropFirst())
             default:
                 throw CLIError("unknown command \(command)\n\(usage)")
             }

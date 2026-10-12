@@ -454,6 +454,190 @@ What to report if it is not that:
   tint (dimmed or red), the wallpaper and the menu bar's appearance.
 - Launch at login stays off with no message, or the entry never appears in System Settings: paste the
   Log window's `launch at login` lines.
+
+## Check 5: the local API, `switchboardctl state`, Stream Deck wrappers and the plugin (tracer bullet 5)
+
+Steps A to G write **nothing to the monitor**: the only runs are `usb.select` against a controller
+mock on this Mac, and the API is served by `switchboardctl serve` (the menu bar app does not start the
+API yet; once it does, every call below works against it unchanged). Step H is optional and does write to the monitor, with the same `0xD7 = 1`
+write as Check 3 step E. Step I needs the Stream Deck app.
+
+Preconditions:
+
+- The Switchboard app is **not** running (it would hold port 48600; `lsof -nP -iTCP:48600
+  -sTCP:LISTEN` prints nothing). If it must run, add `--port 48601` to `serve` here and to every
+  `switchboardctl` command below.
+- Fresh build: `swift build`.
+- Three terminals: 1 for the mock controller, 2 for `serve`, 3 for everything else.
+
+Steps:
+
+A. The token. Terminal 3: `swift run switchboardctl token`.
+
+   Expected: one line of 43 characters from `A-Z a-z 0-9 - _` (base64url, no `=`). On the very first
+   call there is also `switchboardctl: created a new API token` on stderr, and no keychain prompt
+   (the tool made the item itself). `security find-generic-password -s io.github.fgiannazzo.switchboard
+   -a local-api-token` (no `-w`) now prints the item's attributes, and a second `swift run
+   switchboardctl token` prints the same token. Keep it: `TOKEN=$(swift run switchboardctl token)`.
+
+   If a keychain prompt does appear ("wants to use your confidential information"), choose
+   **Always Allow**; after a rebuild it can ask again, because the allowance belongs to that exact
+   binary.
+
+B. Terminal 1: `swift run switchboardctl controller mock --port 48700`. Terminal 3:
+   `swift run switchboardctl settings set controllerURL http://127.0.0.1:48700`. Terminal 2:
+   `swift run switchboardctl serve`.
+
+   Expected in terminal 2:
+
+   ```
+   Switchboard 0.1.0 API listening on http://127.0.0.1:48600
+   token: `switchboardctl token` (Authorization: Bearer <token>)
+   controller: http://127.0.0.1:48700
+   not polling: state stays unknown until a run or `--poll` (reads only) fills it
+   press Ctrl-C to stop
+   ```
+
+   `lsof -nP -iTCP:48600 -sTCP:LISTEN` shows `TCP 127.0.0.1:48600 (LISTEN)`: loopback only, not `*`.
+
+C. With curl, terminal 3:
+
+   ```
+   curl -s -i http://127.0.0.1:48600/health
+   curl -s -i http://127.0.0.1:48600/state
+   curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:48600/state?token=$TOKEN"
+   curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:48600/state
+   ```
+
+   Expected: `/health` is `200` with `{"name":"Switchboard","ok":true,"version":"0.1.0"}`; `/state`
+   without a token is `401` with `{"error":"unauthorized"}`; the token in the query string is `401`
+   (it is never accepted); with the header the state is one JSON line, on a fresh `serve`:
+
+   ```
+   {"controllerReachable":false,"dualUpReachable":false,"hdmiInput":{},"lastError":null,"mainInput":"unknown","pbp":"unknown","updatedAt":"0001-01-01T00:00:00.000Z","usbPort":null}
+   ```
+
+D. `swift run switchboardctl state`, then `swift run switchboardctl state --json`.
+
+   Expected, exit code 0 (everything unknown, nothing has been read yet):
+
+   ```
+   pbp: unknown
+   main input: unknown
+   usb: unknown
+   hdmi: dualup unknown  lg4k unknown  samsung unknown
+   controller: not reachable
+   monitor: not reachable
+   last error: none
+   updated: never
+   ```
+
+   Then, in a second window of terminal 3, `swift run switchboardctl events`: it prints
+   `state  pbp=unknown main=unknown usb=? ...` at once and then waits. Leave it running.
+
+E. A run through the API. Terminal 3:
+
+   ```
+   swift run switchboardctl run usb.select port=2
+   swift run switchboardctl state
+   swift run switchboardctl run usb.select port=1
+   ```
+
+   Expected, exit code 0:
+
+   ```
+   started usb.select (1 step)
+   step 1/1: usb.select: port 2
+   finished usb.select: ok
+   ```
+
+   Terminal 1 shows `POST /usb/select {"port":2} -> 200`. `state` now says `usb: port 2`,
+   `hdmi: dualup 1  lg4k 1  samsung 1`, `controller: reachable`, and `updated:` has a time with
+   milliseconds and a `Z`. The `events` window printed `run    started usb.select (1 step)`,
+   `run    step 1/1: ...`, `run    finished usb.select: ok` and several `state  ...` lines (a `state`
+   line can come just before or after the `run` line it belongs to). The same for `port=1`.
+
+   Error paths, each with its exit code: `run usb.select` prints `missing parameter "port"` (1),
+   `run usb.select port=9` prints `invalid parameter "port": must be 1 to 4, got 9` (1), `run nope`
+   prints `unknown action or macro "nope"` (1). For 7, run `swift run switchboardctl run delay
+   ms=5000` in one window and `swift run switchboardctl run usb.select port=2` in another within
+   those 5 s: `another run is in progress (run ...)` and exit 7.
+
+F. Stop `serve` (Ctrl-C in terminal 2) and ask again, terminal 3:
+
+   ```
+   swift run switchboardctl state; echo $?
+   swift run switchboardctl run usb.select port=2; echo $?
+   ```
+
+   Expected: `state` prints `Switchboard app is not running (no API at http://127.0.0.1:48600); start
+   it, or use "switchboardctl run" which works offline` and `8`. The `run` works anyway, in process,
+   and exits `0` (the mock is still up): `run` falls back when the API does not answer. `events`
+   exits 8 the same way. Start `serve` again for steps G to I.
+
+G. Stream Deck wrappers, no Stream Deck needed yet. Terminal 3: `swift run switchboardctl streamdeck
+   export`.
+
+   Expected: `wrote 5 wrappers and README.txt to ~/Library/Application Support/Switchboard/StreamDeck/`
+   and the names `guest.command`, `monitor.pbp.off.command`, `monitor.pbp.on.command`,
+   `monitor.read.command`, `solo.command`. `ls -l` shows `-rwxr-xr-x` on each, and
+   `cat ~/Library/Application\ Support/Switchboard/StreamDeck/solo.command` is exactly:
+
+   ```
+   #!/bin/bash
+   # Generated by `switchboardctl streamdeck export`. Regenerate instead of editing.
+   exec "<path to switchboardctl>" run solo
+   ```
+
+   Run the command again: same output, and `ls -l` shows unchanged modification times.
+   **Do not run `guest.command`, `solo.command` or the `monitor.*` wrappers in this step**: they
+   write to the monitor (step H).
+
+H. Optional, **writes to the monitor** (`0xD7 = 1` over the video cable, a no-op with PBP already
+   off). In Finder, double-click `solo.command`.
+
+   Expected: Terminal opens and prints `started solo (2 steps)`, `step 1/2: usb.select: port 1`,
+   `step 2/2: monitor.pbp.off: verified 0xD7 = 1`, `finished solo: ok`, then the window closes or
+   says `[Process completed]`. If `serve` is still running this ran through it, otherwise in
+   process; either way terminal 1 shows `POST /usb/select {"port":1} -> 200`. The first run may
+   raise the keychain prompt of step A.
+
+I. The Stream Deck, with the app and the plugin (phase 2; `serve` on port 48600, step B):
+
+   1. `cd StreamDeckPlugin && npm ci && npm run build`, then `npx streamdeck dev` once and
+      `npx streamdeck link io.github.fgiannazzo.switchboard.sdPlugin`.
+   2. In the Stream Deck app drag **Switchboard → State** onto a key, set Field to `usbPort`, open
+      **Connection**, keep host `127.0.0.1` and port `48600`, paste `$TOKEN`, press **Test
+      connection**.
+
+      Expected: `Switchboard 0.1.0: token accepted. PBP unknown, USB port 1, controller reachable`.
+      `PBP unknown` because `serve` has not read the monitor (`serve --poll` would, reads only);
+      `USB port 1, controller reachable` because step E's last run asked the mock. A `serve` that
+      has run nothing yet says `USB port ?, controller unreachable`.
+   3. The tile shows `1`. Terminal 3: `swift run switchboardctl run usb.select port=2`. Expected: the
+      tile changes to `2` within a second, with no press. Run `port=1` and it goes back.
+   4. Drag **Switchboard → Run** onto another key, id `usb.select`, Parameters `{"port": 2}`, press
+      it. Expected: the green check, terminal 1 shows `POST /usb/select {"port":2} -> 200`, and the
+      tile shows `2`. With the id `nope` the key shows the yellow triangle.
+   5. A phase 1 key: **System → Open**, choose `solo.command`, press it (this is step H's write).
+      `switchboard://run/solo` goes to the app, not to the API (Check 4: `open "switchboard://run/solo"`).
+
+What to report if it is not that:
+
+- `cannot listen on 127.0.0.1:48600 ... Address already in use`: something holds the port, usually
+  the app; `lsof -nP -iTCP:48600 -sTCP:LISTEN`. Paste it.
+- A keychain error from `token` (`keychain error -25308` and similar): paste the full line. To
+  proceed without the keychain, `export SWITCHBOARD_TOKEN_FILE=/tmp/switchboard-token` in every
+  terminal that runs `switchboardctl`, and paste that token into the plugin; say that you did.
+- `rejected the API token (401)` from `state` or `run`: `serve` and the CLI disagree about the token
+  (one of them has `SWITCHBOARD_TOKEN_FILE` set). Paste `env | grep SWITCHBOARD`.
+- `state` says the app is not running while `serve` is up: wrong port. `settings show` prints
+  `localAPIPort`; paste it and the `serve` banner.
+- A `run` that hangs or ends without `finished`/`failed`: paste the `events` window and terminal 2.
+- A State tile stuck on `?` after a green Test connection: paste the plugin log
+  (`StreamDeckPlugin/io.github.fgiannazzo.switchboard.sdPlugin/logs/`) and the output of
+  `curl -s -N -H "Authorization: Bearer $TOKEN" http://127.0.0.1:48600/events` for 20 s: it should
+  print one `state` event at once and `: keepalive` after 15 s.
 - Anything that contradicts `docs/BRIEF.md`: stop and paste the complete output.
 
 Record the result (date, pass/fail, pasted output) in the pull request that introduced the check.

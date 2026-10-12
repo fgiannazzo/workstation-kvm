@@ -15,6 +15,7 @@ and this file gets fixed.
 | CLI | `switchboardctl` |
 | Application Support | `~/Library/Application Support/Switchboard/` (`macros.json`, `settings.json`, `log.txt`) |
 | Keychain item | service `io.github.fgiannazzo.switchboard`, account `local-api-token` |
+| Token file (development) | env `SWITCHBOARD_TOKEN_FILE=<path>`: `switchboardctl` reads and writes the token there (mode 0600) instead of the keychain |
 | Local API | `http://127.0.0.1:48600` (port configurable) |
 | URL scheme | `switchboard://run/{id}` |
 | mDNS service (ESP32) | `_switchboard._tcp` |
@@ -61,7 +62,8 @@ Sources/
   AppCore/              Everything of the menu bar app that can be tested: AppModel, the
                         switchboard:// URL parser, status glyph, run progress, macro editor drafts.
                         No SwiftUI.
-  LocalAPI/             HTTP API, bearer auth, SSE events, Stream Deck wrapper generator.
+  LocalAPI/             HTTP API, keychain bearer token, SSE events, the Swift client, Stream Deck wrapper
+                        generator.
   switchboardctl/       CLI executable.
   SwitchboardApp/       Menu bar app executable (SwiftUI MenuBarExtra): scenes and views only.
 Tests/
@@ -88,18 +90,25 @@ switchboardctl -> Actions, StateStore until LocalAPI exists (tracer bullet 3)
 
 `SwitchboardCore` has no dependencies and no I/O. Nothing depends on an executable.
 
-Until `LocalAPI` exists (tracer bullet 5), `switchboardctl` links `Devices` and `DDCKit`
-directly for `monitor list`, `monitor read`, `monitor pbp on|off` and `monitor bridge list|reset`,
-and `Actions` and `StateStore` for `run`, `actions`, `macros` and `settings` (in-process, through
-`Runtime.live`; the CLI does not start the `StateRefresher`). From tracer bullet 5 on `run`,
-`actions`, `macros`, `state` and `events` talk to the API; `settings` and `controller` stay local.
+`switchboardctl` links `Devices` and `DDCKit` directly for `monitor list`, `monitor read`,
+`monitor pbp on|off` and `monitor bridge list|reset`, and `Actions` and `StateStore` for `settings`
+and for `run`, `actions` and `macros` when the app is not there (in-process, through `Runtime.live`;
+the CLI does not start the `StateRefresher`). Since tracer bullet 5 `run`, `actions` and `macros`
+prefer the local API: when `GET /health` answers within 300 ms they go through the app, so its one
+runner and its busy rule apply, and otherwise (or with `--local`) they work in process as before.
+`state` and `events` need the app (exit 8 without it). `settings` and `controller` stay local.
+`serve` runs `LocalAPIServer` over `Runtime.live` in the CLI process, for development; `token`
+prints the token; `streamdeck export` writes the `.command` wrappers. The code is in
+`Sources/switchboardctl/API.swift`.
 
 `switchboardctl` exit codes: 0 ok, 1 error, 2 display not found (`DDCError.displayNotFound`),
 3 write unverified (`WriteOutcome.verified == false`), 4 USB bridge not found
 (`DDCError.bridgeNotFound`), 5 USB bridge busy (`DDCError.bridgeBusy`), 6 controller not
 configured or unreachable (`controller` commands, and `run` when `ActionError.isControllerUnreachable`),
-7 another run in progress (`run`; `ActionError.busy`). `run` also exits 3 when a monitor write was
-not verified and 1 for any other failed run. `--dry-run` on `monitor pbp` prints the bytes from
+7 another run in progress (`run`; `ActionError.busy`, or HTTP 409 from the app), 8 the Switchboard
+app is not running (`state`, `events`: no API answered). `run` also exits 3 when a monitor write was
+not verified and 1 for any other failed run. Through the app, 3 and 6 are recovered from the
+`failed` event's message (`RunEvent.failureKind`), since the event carries text only. `--dry-run` on `monitor pbp` prints the bytes from
 `Devices.DryRunFormatter` and constructs no transport.
 
 ## Concurrency
@@ -696,16 +705,118 @@ and a `CFBundleIconFile` for the icon that `Scripts/make-icon.swift` draws at bu
 an existing bundle and does not build one; the macro editor requires a non-empty name, which the store
 does not.
 
-## LocalAPI
+## LocalAPI (tracer bullet 5, final)
 
-The wire contract is `docs/API.md`; clients are built against that file.
+The wire contract is `docs/API.md`; clients (the CLI, the generated wrappers, the Stream Deck plugin)
+are built against that file. `Sources/LocalAPI` depends on `TinyHTTP`, `Actions`, `StateStore` and
+`SwitchboardCore`.
 
-`GET /state` (SwitchboardState), `GET /actions`, `GET /macros`, `POST /run/{id}` (optional
-JSON body with parameters; 202 with a run id, result pushed on `/events`), `GET /events`
-(server-sent events: `state` and `run` events). Every request needs
-`Authorization: Bearer <token>`; the token is generated on first launch and stored in the
-keychain; `switchboardctl token` prints it. Bind `127.0.0.1` only. The URL scheme has no
-token (it is OS-mediated and only reaches the app).
+```swift
+public enum SwitchboardVersion { static let current = "0.1.0" }     // the one place; GET /health, `switchboardctl --version`
+
+// Token
+public protocol TokenStoring: Sendable { func load() throws -> String?; func save(_ token: String) throws }
+public struct KeychainTokenStore: TokenStoring {     // generic password, login keychain, no data-protection keychain
+    init(service: String = TokenStore.service, account: String = TokenStore.account)
+    func delete() throws                             // tests only
+}
+public struct FileTokenStore: TokenStoring { init(url: URL) }   // mode 0600, directory 0700
+public enum TokenStore {
+    static let service = "io.github.fgiannazzo.switchboard", account = "local-api-token", byteCount = 32
+    static func generate() throws -> String          // 32 bytes from SecRandomCopyBytes, base64url, no padding: 43 chars
+    static func loadOrCreate(using: some TokenStoring) throws -> String
+    static func resolve(using: some TokenStoring) throws -> (token: String, created: Bool)
+    static func constantTimeEquals(_: String, _: String) -> Bool
+}
+public enum TokenStoreError: Error { keychain(status: Int32, detail: String), corrupt(String), file(path: String, detail: String), randomFailure(Int32) }
+
+// Server
+public actor LocalAPIServer {
+    init(runtime: Runtime, port: UInt16, token: String, version: String = SwitchboardVersion.current,
+         host: String = "127.0.0.1", keepaliveInterval: Duration = .seconds(15))
+    static func start(runtime: Runtime, tokenStore: some TokenStoring = KeychainTokenStore(),
+                      version: String = SwitchboardVersion.current) async throws -> LocalAPIServer
+    func start() async throws;  func stop() async
+    private(set) var port: UInt16                    // the bound port after start(); the requested one before and after
+    var isRunning: Bool, activeConnectionCount: Int, url: URL?       // async getters
+    nonisolated let host: String, version: String, requestedPort: UInt16
+}
+public enum LocalAPIServerError: Error { invalidPort(Int) }
+
+// Client
+public struct LocalAPIClient: Sendable {
+    static let defaultBaseURL = http://127.0.0.1:48600;  static func baseURL(port: Int) -> URL
+    init(baseURL: URL = defaultBaseURL, token: String?, timeout: TimeInterval = 5, session: URLSession? = nil)
+    func health() async throws -> HealthResponse                       // no token sent
+    func state() async throws -> SwitchboardState
+    func actions() async throws -> ActionList;  func macros() async throws -> MacroFile
+    func run(id: String, parameters: [String: JSONValue] = [:]) async throws -> RunHandle
+    func events() -> AsyncThrowingStream<APIEvent, any Error>           // SSEParser.events(from:); does not reconnect
+}
+public enum APIEvent: Sendable, Equatable { case state(SwitchboardState), run(RunEvent) }
+public enum LocalAPIError: Error, Sendable, Equatable {
+    case unreachable(URL, underlying: String), unauthorized, status(Int, body: String), invalidResponse(String)
+    var errorBody: APIErrorBody?, isUnreachable: Bool
+}
+public struct HealthResponse: Codable { ok: Bool, name: String, version: String }
+public struct APIErrorBody: Codable { error: String, id/parameter/reason/runId: String? }
+
+// JSON, wrappers, failure kinds
+public enum APIJSON {       // sorted keys, no spaces, dates "2026-10-11T20:15:03.120Z"
+    static func makeEncoder() -> JSONEncoder;  static func makeDecoder() -> JSONDecoder
+    static func string(from: Date) -> String;  static func date(from: String) -> Date?;  static let neverUpdated: String
+}
+public enum StreamDeckWrappers {
+    static func generate(into directory: URL, macros: [Macro], actions: [ActionDescriptor],
+                         switchboardctlPath: String) throws -> [URL]   // sorted wrapper files; README.txt is written too
+}
+public enum RunFailureKind { unverifiedWrite, controllerUnreachable, other }
+extension RunEvent { var failureKind: RunFailureKind? }                 // nil unless status == .failed
+```
+
+Behaviour worth knowing before building on it:
+
+- **Auth first.** One check in front of the router: everything except `GET /health` (and `HEAD`) needs
+  `Authorization: Bearer <token>`, compared in constant time; the query string is never read. An unknown
+  path or a wrong method without a token is `401` as well; with a token they are 404 and 405. An empty
+  server token authenticates nobody.
+- **Bind.** `127.0.0.1` only (`host` exists for tests). `start()` throws when the port is taken.
+- **Main actor.** `GET /state` reads `runtime.store.state` with one hop to the main actor; `/events` takes
+  `runtime.store.changes` and `runtime.runner.events` the same way. Nothing else in the server is
+  main-actor bound.
+- **`POST /run/{id}`** parses an optional JSON object body into `[String: JSONValue]` and calls
+  `runner.start`; `ActionError.unknownID` is 404, `.missingParameter` and `.invalidParameter` are 400,
+  `.busy` is 409 with the running `runId`, any other error 500. The run itself is never awaited: the
+  `202` carries the `RunHandle` and progress arrives on `/events`.
+- **`GET /events`** subscribes to `runner.events` first, then to `store.changes` (whose first element is
+  the current state, the connect-time `state` event), and forwards both on one connection plus a
+  `: keepalive` comment every `keepaliveInterval`. The producer is a task group; `TinyHTTP` cancels the
+  producer when the client disconnects, which cancels the three forwarders and, through the streams'
+  termination handlers, removes both subscriptions. A test pins that `subscriberCount` of the store and
+  the runner and the server's connection count all return to 0.
+- **Dates.** `JSONEncoder`'s `.iso8601` has no milliseconds and `ISO8601DateFormatter` truncates binary
+  fractions (`x.12` can print `.119`), so `APIJSON` formats and parses by hand (civil-date arithmetic,
+  rounded to the millisecond). `Date.distantPast`, a state's `updatedAt` before its first update, is
+  written `0001-01-01T00:00:00.000Z` and read back as `.distantPast`.
+- **The client** sends the token on every request but `/health`, uses an ephemeral session without
+  proxies, maps transport errors to `.unreachable`, 401 to `.unauthorized`, any other non-2xx to
+  `.status`, and gives `events()` a 45 s silence limit (`docs/API.md`). Unknown event names are ignored.
+- **The CLI** finds the app by `GET /health` within 300 ms and a `name` of `Switchboard`, then reads the token
+  (keychain, or `SWITCHBOARD_TOKEN_FILE`). To follow a run it opens `/events`, waits for the first `state`
+  event, then `POST`s the run and prints the events with its `runId`.
+- **Wrappers.** One `<id>.command` per macro and per parameter-free action (a macro wins over an action with
+  the same id), `#!/bin/bash` plus `exec "<switchboardctl>" run <id>`, mode 0755, and a `README.txt`. A
+  file that is already right is not rewritten; nothing is deleted; ids that are not safe file names or that
+  differ only in case are refused before anything is written.
+
+The URL scheme has no token (it is OS-mediated and only reaches the app); it is the app's, tracer
+bullet 4.
+
+Deviations from the first draft of this section, recorded in tracer bullet 5: `LocalAPIServer.start(runtime:)`
+and `keepaliveInterval` were added; `switchboardctl serve --poll` starts the `StateRefresher` (reads only)
+and `SWITCHBOARD_TOKEN_FILE` swaps the keychain for a file, both for development; `SwitchboardVersion` lives in
+`LocalAPI`; the API gained the 400 `invalid parameter` and `invalid body` bodies, the `500` body, and the
+`0001-01-01T00:00:00.000Z` spelling of a never-updated state, all documented in `docs/API.md`.
 
 ## Hardware rules for anyone, human or agent, working in this repository
 

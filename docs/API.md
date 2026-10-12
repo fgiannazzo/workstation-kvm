@@ -13,7 +13,10 @@ random 32-byte value, base64url without padding, generated on first launch and s
 keychain (service `io.github.fgiannazzo.switchboard`, account `local-api-token`).
 `switchboardctl token` prints it; the app's settings pane shows it with a copy button.
 Missing or wrong token: `401 {"error":"unauthorized"}`. Never accept the token as a query
-parameter.
+parameter. The scheme name `Bearer` is case-insensitive. The token is checked before the request is
+routed, so an unknown path or a wrong method without a token is `401` too (the API does not say
+what exists); with a valid token they are `404 {"error":"not found"}` and
+`405 {"error":"method not allowed"}` with an `Allow` header.
 
 ## Encoding
 
@@ -44,6 +47,10 @@ The `SwitchboardState` object:
   "updatedAt": "2026-10-11T20:15:03.120Z"
 }
 ```
+
+Every key is always present (`usbPort` and `lastError` are explicit `null`, `hdmiInput` is `{}`
+when nothing is known). `updatedAt` of a state that has never been updated, such as a freshly
+launched app before its first read, is `0001-01-01T00:00:00.000Z`.
 
 ### `GET /actions`
 
@@ -89,8 +96,15 @@ last step.
 
 - `202 Accepted` `{ "runId": "7f3c…", "id": "guest", "kind": "macro" }` (kind is `macro` or `action`). The run proceeds asynchronously; progress and result arrive on `/events`.
 - `400` `{ "error": "missing parameter", "parameter": "port" }`
+- `400` `{ "error": "invalid parameter", "parameter": "port", "reason": "must be 1 to 4, got 9" }`
+- `400` `{ "error": "invalid body", "reason": "…" }` when the body is not a JSON object (an empty body, `null` and `{}` all mean "no parameters")
 - `404` `{ "error": "unknown id", "id": "…" }`
 - `409` `{ "error": "busy", "runId": "…" }` when another run is in progress.
+- `500` `{ "error": "…" }` when `macros.json` cannot be read (the message names the file).
+
+Every error body is `{ "error": "<code>" }` plus the keys listed for it. A run that is accepted and
+then fails is not an HTTP error: the `202` has been sent, and the failure arrives as a `failed`
+event.
 
 ### `GET /events`
 
@@ -122,6 +136,12 @@ is configured. A single action runs as a one-step run (`stepCount` 1, `kind` `ac
 `SwitchboardState` (polls, actions, controller events). Clients reconnect with backoff
 starting at 1 s, capped at 30 s.
 
+Ordering: the server subscribes to run progress before it sends the connect-time `state`, so a
+client that waits for that first event and then `POST`s a run cannot miss any of its `run` events.
+The `state` and `run` events travel on separate streams, so no order between them is promised: the
+`state` event that shows a run's result can arrive just before or just after its `finished`. Within
+the `run` events of one run the order is always `started`, `step`…, then `finished` or `failed`.
+
 ## URL scheme
 
 `switchboard://run/{id}` and `switchboard://run/{id}?port=2` behave like `POST /run/{id}`
@@ -130,6 +150,13 @@ without a token. The Stream Deck "Open" action (open a URL) is the simplest phas
 ## CLI equivalents
 
 `switchboardctl state`, `switchboardctl actions`, `switchboardctl macros`,
-`switchboardctl run <id> [key=value…]`, `switchboardctl events`, `switchboardctl token`.
-The CLI talks to the API when the app is running and prints a clear message pointing at the
-app when it is not.
+`switchboardctl run <id> [key=value…]`, `switchboardctl events`, `switchboardctl token`,
+`switchboardctl serve` (this API, served by the CLI instead of the app, for development) and
+`switchboardctl streamdeck export` (the `.command` wrappers).
+
+`run`, `actions` and `macros` talk to the app when `GET /health` answers within 300 ms, so the app's
+one runner and its busy rule apply, and do the work in process when it does not (`--local` always
+does). `state` and `events` need the app: without it they print
+`Switchboard app is not running (no API at http://127.0.0.1:PORT); start it, or use "switchboardctl run" which works offline`
+and exit 8. The token comes from the keychain (the environment variable `SWITCHBOARD_TOKEN_FILE`
+names a file instead, for development), the port from the `localAPIPort` setting or `--port N`.
