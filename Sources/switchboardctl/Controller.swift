@@ -37,6 +37,7 @@ struct ControllerOptions {
     var url: String?
     var discover = false
     var timeout: Double = 3
+    var timeoutGiven = false
     var json = false
     var resync = false
     var port: UInt16 = 48700
@@ -89,6 +90,7 @@ func parseControllerOptions(_ args: ArraySlice<String>, allowing allowed: Set<St
                 throw CLIError("--timeout needs a number of seconds between 0 and 60, got \(text)")
             }
             options.timeout = seconds
+            options.timeoutGiven = true
         case "--port":
             let text = try value(for: flag, inline: inline, &iterator)
             guard let port = UInt16(text) else { throw CLIError("--port needs a port number (0-65535), got \(text)") }
@@ -176,6 +178,9 @@ private func rejectPositionals(_ options: ControllerOptions, for command: String
 func controllerBaseURL(_ options: ControllerOptions) async throws -> URL {
     if options.url != nil, options.discover {
         throw CLIError("--url and --discover are alternatives; pass one")
+    }
+    if options.timeoutGiven, !options.discover {
+        throw CLIError("--timeout is the discovery time limit; it only applies with --discover")
     }
     if let raw = options.url {
         return try parseControllerURL(raw, source: "--url")
