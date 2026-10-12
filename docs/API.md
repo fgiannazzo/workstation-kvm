@@ -113,7 +113,11 @@ data: {"runId":"7f3c…","id":"guest","kind":"macro","status":"finished","step":
 ```
 
 Every event's `data` is one complete JSON document on a single `data:` line. `status` is
-`started`, `step`, `finished` or `failed`; `message` on `failed` is the error. A comment line
+`started`, `step`, `finished` or `failed`; `message` on `failed` is the error. `step` counts
+completed steps: 0 on `started`, 1 after the first step, `stepCount` on `finished`. On `failed` it
+is the 1-based number of the step that failed (a macro's `verify` counts as step `stepCount`), or 0
+when the run failed before its first step, for example a macro that needs the controller when none
+is configured. A single action runs as a one-step run (`stepCount` 1, `kind` `action`). A comment line
 `: keepalive` goes out every 15 s; clients may treat 45 s of silence as a dead connection. A `state` event follows every change of
 `SwitchboardState` (polls, actions, controller events). Clients reconnect with backoff
 starting at 1 s, capped at 30 s.

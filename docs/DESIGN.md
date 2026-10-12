@@ -54,13 +54,16 @@ Sources/
   TinyHTTP/             Minimal HTTP/1.1 server on Network.framework, with SSE support.
                         Shared by MockESP32 and LocalAPI.
   ESP32Kit/             ESP32Client (URLSession + mDNS browse), MockESP32 (TinyHTTP).
-  StateStore/           @MainActor @Observable StateStore and its refresh sources.
-  Actions/              Action registry, Macro model, MacroStore (JSON), MacroRunner.
+  StateStore/           Settings, SettingsStore, and the @MainActor @Observable StateStore.
+                        Depends on SwitchboardCore only (no devices).
+  Actions/              Action registry, Macro model, MacroStore (JSON), MacroRunner, Runtime
+                        (composition root) and StateRefresher (polling; the app starts it).
   LocalAPI/             HTTP API, bearer auth, SSE events, Stream Deck wrapper generator.
   switchboardctl/       CLI executable.
   SwitchboardApp/       Menu bar app executable (SwiftUI MenuBarExtra).
 Tests/
-  DDCKitTests/ DevicesTests/ TinyHTTPTests/ ESP32KitTests/ ActionsTests/ LocalAPITests/
+  SwitchboardCoreTests/ DDCKitTests/ DevicesTests/ TinyHTTPTests/ ESP32KitTests/
+  StateStoreTests/ ActionsTests/ LocalAPITests/
 App/Info.plist          LSUIElement, CFBundleURLTypes for switchboard://
 Scripts/make-app.sh
 StreamDeckPlugin/       Phase 2, npm package.
@@ -75,18 +78,25 @@ switchboardctl, SwitchboardApp -> LocalAPI -> Actions -> Devices -> DDCKit -> IO
                                    |            +-> StateStore -> SwitchboardCore
                                    +-> TinyHTTP          ESP32Kit -> TinyHTTP, SwitchboardCore
 Devices, DDCKit -> SwitchboardCore   (PBPState, MainInput)
+Actions -> ESP32Kit, DDCKit, SwitchboardCore   (Runtime builds ESP32Client, VideoCableDDC, LGUSBBridge)
+switchboardctl -> Actions, StateStore until LocalAPI exists (tracer bullet 3)
 ```
 
 `SwitchboardCore` has no dependencies and no I/O. Nothing depends on an executable.
 
 Until `LocalAPI` exists (tracer bullet 5), `switchboardctl` links `Devices` and `DDCKit`
-directly for `monitor list`, `monitor read`, `monitor pbp on|off` and `monitor bridge list|reset`;
-from tracer bullet 5 on it talks to the API.
+directly for `monitor list`, `monitor read`, `monitor pbp on|off` and `monitor bridge list|reset`,
+and `Actions` and `StateStore` for `run`, `actions`, `macros` and `settings` (in-process, through
+`Runtime.live`; the CLI does not start the `StateRefresher`). From tracer bullet 5 on `run`,
+`actions`, `macros`, `state` and `events` talk to the API; `settings` and `controller` stay local.
 
 `switchboardctl` exit codes: 0 ok, 1 error, 2 display not found (`DDCError.displayNotFound`),
 3 write unverified (`WriteOutcome.verified == false`), 4 USB bridge not found
-(`DDCError.bridgeNotFound`), 5 USB bridge busy (`DDCError.bridgeBusy`). `--dry-run` on
-`monitor pbp` prints the bytes from `Devices.DryRunFormatter` and constructs no transport.
+(`DDCError.bridgeNotFound`), 5 USB bridge busy (`DDCError.bridgeBusy`), 6 controller not
+configured or unreachable (`controller` commands, and `run` when `ActionError.isControllerUnreachable`),
+7 another run in progress (`run`; `ActionError.busy`). `run` also exits 3 when a monitor write was
+not verified and 1 for any other failed run. `--dry-run` on `monitor pbp` prints the bytes from
+`Devices.DryRunFormatter` and constructs no transport.
 
 ## Concurrency
 
@@ -381,8 +391,9 @@ Behaviour worth knowing before building on it:
 - `switchboardctl controller ...` talks to the controller directly, also after tracer bullet 5:
   it diagnoses the board itself, which the app's local API does not expose. The commands live in
   `Sources/switchboardctl/Controller.swift`; `main.swift` only dispatches to them.
-- The `hdmi.*` and `usb.*` actions are not wired in tracer bullet 6: the action registry does not
-  exist yet. Tracer bullet 3 adds them on top of `ControllerClient` as described under Actions.
+- The `hdmi.*` and `usb.*` actions sit on top of `ControllerClient`; tracer bullet 3 wired them
+  (see Actions). `Runtime.live` builds an `ESP32Client` from `controllerURL` or
+  `SWITCHBOARD_CONTROLLER_URL`.
 
 ## Actions
 
@@ -407,12 +418,152 @@ counts as a failure. `verify` is optional and compares fields of `SwitchboardSta
 the last step. Default macros shipped on first launch: `guest` (pbp on, usb port 2) and
 `solo` (usb port 1, pbp off).
 
-`ActionRegistry` resolves an id plus parameters to an `Action` and runs it against an
-`ActionContext { dualUp: LGDualUp?, controller: (any ControllerClient)?, store: StateStore,
-notify: (String) -> Void }`. With no controller configured, `hdmi.*` and `usb.*` throw
-`ActionError.controllerUnavailable` with a message that names the setting to fix.
-`POST /run/{id}` and `switchboardctl run {id}` accept a macro id or a parameter-free
-action id.
+`ActionRegistry` resolves an id plus parameters to what the action does and runs it against an
+`ActionContext` (final signatures below). With no controller configured, `hdmi.*` and `usb.*`
+throw `ActionError.controllerUnavailable` with a message that names the setting and the
+environment variable to fix. `POST /run/{id}` and `switchboardctl run {id}` accept a macro id
+(parameters ignored) or an action id with its parameters.
+
+### Application layer (tracer bullet 3, final)
+
+```swift
+// SwitchboardCore (pure)
+public enum JSONValue: Sendable, Equatable, Hashable, Codable {
+    case string(String), int(Int), double(Double), bool(Bool), null, array([JSONValue]), object([String: JSONValue])
+}   // ExpressibleBy{String,Integer,Float,Boolean,Nil,Array,Dictionary}Literal; stringValue, intValue
+    // (also an integral double), doubleValue, boolValue, arrayValue, objectValue, isNull, subscripts
+
+// StateStore
+public struct Settings: Codable, Sendable, Equatable {
+    var controllerURL: URL? = nil;  var displayNameContains = "SDQHD";  var pollingIntervalSeconds: Double = 30
+    var localAPIPort = 48600;  var launchAtLogin = false
+    func effectiveControllerURL(environment: [String: String]) -> URL?   // SWITCHBOARD_CONTROLLER_URL wins
+    static func parseControllerURL(_ raw: String) -> URL?                // http(s)://host:port, or host:port
+    mutating func set(_ key: String, to value: String) throws            // SettingsError; keys in Settings.Key
+}
+public enum AppSupport { static func defaultDirectory() -> URL; static func directory(environment:) -> URL }
+    // ~/Library/Application Support/Switchboard/; SWITCHBOARD_SUPPORT_DIR overrides it (CLI, tests)
+public actor SettingsStore {
+    init(directory: URL = AppSupport.defaultDirectory())
+    nonisolated var fileURL: URL, fileExists: Bool
+    func load() throws -> Settings                  // missing file: defaults, nothing written
+    func save(_ settings: Settings) throws          // creates the directory, atomic
+    func update(_ change: @Sendable (inout Settings) throws -> Void) throws -> Settings
+}
+@MainActor @Observable public final class StateStore {
+    static let logCapacity = 500
+    private(set) var state: SwitchboardState;  private(set) var log: [LogEntry]
+    init(initial: SwitchboardState = SwitchboardState(), now: @escaping @Sendable () -> Date = { Date() })
+    func applyMonitor(pbp: PBPState, mainInput: MainInput, reachable: Bool)
+    func apply(_ controller: ControllerState)       // hdmiInput, usbPort, controllerReachable = true
+    func setControllerReachable(_:), setDualUpReachable(_:), setLastError(_: String?)
+    func log(_ level: LogEntry.Level, _ message: String)    // ring buffer; does not touch state
+    var changes: AsyncStream<SwitchboardState>      // current state first, then every mutation; one stream per access
+}   // every state mutation sets updatedAt from `now` and publishes; the log does neither
+
+// Actions
+public enum ActionID: String, Codable, CaseIterable, Sendable { monitorPBPOn = "monitor.pbp.on", ... notify }
+public struct ParameterDescriptor: Codable { name; type: .string | .int | .choice ("enum"); values: [String]?; min: Int?; max: Int? }
+public struct ActionDescriptor: Codable { id: ActionID; title: String; parameters: [ParameterDescriptor] }
+public struct ActionList: Codable { actions: [ActionDescriptor] }          // GET /actions
+public struct MacroStep: Codable { action: ActionID; parameters: [String: JSONValue] }   // parameters are sibling keys
+public struct MacroVerify: Codable { pbp: PBPState?; mainInput: MainInput?; usbPort: Int?; hdmiInput: [DisplayID: Int]? }
+public struct Macro: Codable { id: String; name: String; steps: [MacroStep]; verify: MacroVerify? }
+public struct MacroFile: Codable { macros: [Macro] }                      // macros.json and GET /macros
+public actor MacroStore {
+    init(directory: URL = AppSupport.defaultDirectory(), registry: ActionRegistry = ActionRegistry())
+    static let defaultMacros: [Macro]               // guest, solo
+    func load() throws -> [Macro]                   // reads macros.json; no file: writes the defaults first
+    func macros() throws -> [Macro];  func macro(id: String) throws -> Macro?
+    func save(_ macros: [Macro]) throws;  func upsert(_ macro: Macro) throws;  func remove(id: String) throws -> Bool
+}   // save validates first (MacroValidator); a file on disk that is invalid is an error and is never overwritten
+public struct ActionContext: Sendable {
+    var dualUp: LGDualUp?;  var controller: (any ControllerClient)?;  var store: StateStore
+    var notify: @Sendable (String) async -> Void;  var sleep: Sleeper
+}
+public enum ActionError: Error, Sendable, Equatable {
+    case unknownID(String), missingParameter(String), invalidParameter(String, String)
+    case controllerUnavailable(String), monitorUnavailable(String), unverified(WriteOutcome)
+    case busy(runID: String), verifyFailed([String]), controller(ControllerError), cancelled
+    var isUnverifiedWrite: Bool, isControllerUnreachable: Bool, isBusy: Bool       // for exit codes
+}
+public struct ActionRegistry: Sendable {
+    let descriptors: [ActionDescriptor]             // docs/API.md order
+    func validate(_ id: ActionID, parameters: [String: JSONValue]) throws -> ActionArguments
+    func run(_ id: ActionID, parameters: [String: JSONValue], context: ActionContext) async throws -> String
+}
+public struct RunHandle: Codable, Sendable, Equatable { runId: String; id: String; kind: .macro | .action }   // the 202 body
+public struct RunEvent: Codable, Sendable, Equatable {   // the `run` event
+    runId, id, kind, status: .started | .step | .finished | .failed, step: Int, stepCount: Int, message: String
+}
+public actor MacroRunner {
+    init(registry: ActionRegistry, macros: MacroStore, context: ActionContext)
+    func start(id: String, parameters: [String: JSONValue] = [:]) async throws -> RunHandle
+    var events: AsyncStream<RunEvent>               // one stream per access; subscribe before start
+    func wait(_ handle: RunHandle) async -> RunEvent
+    func error(of handle: RunHandle) -> ActionError?
+    func execute(id: String, parameters: [String: JSONValue], onEvent: @Sendable (RunEvent) -> Void) async throws -> RunReport
+    var currentRun: RunHandle?, activity: RunActivity
+}
+public struct Runtime: Sendable {                   // composition root
+    let settings, controllerURL, dualUp, controller, store, macros, registry, context, runner, refresher
+    @MainActor static func live(settings: Settings, environment: [String: String] = ProcessInfo.processInfo.environment,
+                                appSupport: URL, notify: @escaping @Sendable (String) async -> Void = { _ in }) -> Runtime
+    @MainActor init(settings:controllerURL:dualUp:controller:appSupport:notify:sleep:store:)   // fakes in tests
+}
+@MainActor public final class StateRefresher {
+    init(dualUp:controller:store:interval:sleep:activity:)
+    func start(); func stop(); func refresh() async; var isRunning: Bool
+}
+```
+
+How a run behaves, which `LocalAPI` (tracer bullet 5) serves as it is:
+
+- `start` answers with the handle as soon as the run is accepted, after publishing `started`;
+  the steps run in a task of their own. One run at a time: a second `start` throws
+  `ActionError.busy(runID:)` with the running run's id (HTTP 409). The slot is released in the same
+  turn as the `finished`/`failed` event, so a client that sees the event can start the next run.
+- `start` throws, and runs nothing, for an unknown id (`unknownID`, 404) and for an action whose
+  parameters are missing or invalid (`missingParameter`/`invalidParameter`, 400). A macro id wins
+  over an action id; a macro ignores the parameters passed. It also throws a `MacroStoreError`
+  when `macros.json` cannot be loaded and the id is not an action id. A macro's own steps were
+  validated when `macros.json` was loaded or saved.
+- A run that needs a device this process does not have (a controller step with no controller, a
+  monitor step with no monitor) is accepted and fails before its first step: `started`, then
+  `failed` with `step` 0 and the message of `ActionError.controllerUnavailable` (it names
+  `controllerURL` and `SWITCHBOARD_CONTROLLER_URL`). `guest` therefore never switches PBP on and
+  only then finds that `usb.select` has no controller.
+- Events: `started` (step 0), `step` after each completed step (`step` = steps done, `message` =
+  what the action reported, for example `monitor.pbp.on: verified 0xD7 = 0`), then `finished`
+  (`step == stepCount`, `message` `ok`) or `failed`. On `failed`, `step` is the 1-based number of
+  the step that failed (the macro's `verify` counts as step `stepCount`; 0 means no step ran) and
+  `message` is `<action id>: <error>`, or `verify failed: usbPort: expected 2, got 1; ...`.
+  A single action runs as a one-step run of kind `action`.
+- A macro stops at the first failing step; later steps do not run. A monitor write that the
+  video-cable read-back does not confirm is a failure (`ActionError.unverified`), and what was read
+  still goes into the store. The `hdmi.*` and `usb.*` actions also fail (`verifyFailed`) when the
+  state the controller answers with does not show the requested input or port.
+- After the last step `verify` is compared with `store.state`; `unknown` never satisfies a field.
+  A macro's `verify` keys are `pbp`, `mainInput`, `usbPort`, `hdmiInput` (an object with a subset of
+  displays); an unknown key is an error when the file is loaded.
+- The store: `monitor.*` actions write the post-write/post-read reading with `applyMonitor`;
+  `hdmi.*`/`usb.*` write the controller's reply with `apply`. A run sets `lastError` when it fails
+  (`<macro id>: <message>` for a macro, the message for an action) and clears it when a run
+  finishes. Every run, step and failure is appended to `log`.
+- `StateRefresher` (started by the app, never by the CLI) polls `readState()` every
+  `pollingIntervalSeconds` and `controller.state()` with it, and applies `controller.events()`.
+  A poll that overlaps a run (`RunActivity`) is thrown away, so a stale reading cannot overwrite
+  what a run verified. It only reads.
+- `Runtime.live` builds `VideoCableDDC` and `LGUSBBridge` for `displayNameContains`, an `ESP32Client`
+  when `settings.effectiveControllerURL(environment:)` is non-nil, and the rest. Constructing it
+  touches no hardware.
+
+Deviations from the first draft of this section, recorded in tracer bullet 3: `ActionContext.notify`
+is `@Sendable (String) async -> Void` (not a synchronous closure) and the context gained `sleep`;
+`ActionError` gained `cancelled`; a run whose steps need a missing device fails before its first
+step instead of at the step; `usb.select`, `hdmi.select` and `hdmi.resync` verify the controller's
+reply; macro ids are restricted to letters, digits, `.`, `_` and `-` (they appear in URL paths);
+`switchboardctl` gained `SWITCHBOARD_SUPPORT_DIR` and exit code 7.
 
 ## LocalAPI
 
