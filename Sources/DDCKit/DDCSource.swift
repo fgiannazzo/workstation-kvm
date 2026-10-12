@@ -8,8 +8,8 @@ public enum DDCSource: UInt8, Sendable, Codable, CaseIterable, Hashable {
 }
 
 /// A raw VCP write. The initialiser is `package`-scoped: only targets inside this package can
-/// construct one, and by rule only `Devices.LGDualUp` does (tracer bullet 2). Outside the
-/// package a write that is not in the whitelist cannot be expressed.
+/// construct one, and by rule only `Devices.LGDualUpCommand` does (plus the test targets).
+/// Outside the package a write that is not in the whitelist cannot be expressed.
 public struct VCPWrite: Sendable, Equatable, Hashable, CustomStringConvertible {
     public let code: UInt8
     public let value: UInt16
