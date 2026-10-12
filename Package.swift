@@ -19,6 +19,8 @@ let package = Package(
         // Menu bar app (tracer bullet 4)
         .library(name: "AppCore", targets: ["AppCore"]),
         .executable(name: "SwitchboardApp", targets: ["SwitchboardApp"]),
+        // Local API (tracer bullet 5)
+        .library(name: "LocalAPI", targets: ["LocalAPI"]),
     ],
     targets: [
         // C: declarations of the private IOAVService entry points. The symbols are exported by IOKit.
@@ -45,7 +47,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "switchboardctl",
-            dependencies: ["Devices", "DDCKit", "SwitchboardCore", "ESP32Kit", "Actions", "StateStore"]
+            dependencies: ["Devices", "DDCKit", "SwitchboardCore", "ESP32Kit", "Actions", "StateStore", "LocalAPI"]
         ),
         .testTarget(name: "SwitchboardCoreTests", dependencies: ["SwitchboardCore"]),
         .testTarget(name: "DDCKitTests", dependencies: ["DDCKit"]),
@@ -83,6 +85,17 @@ let package = Package(
         .testTarget(
             name: "AppCoreTests",
             dependencies: ["AppCore", "Actions", "StateStore", "Devices", "DDCKit", "ESP32Kit", "SwitchboardCore"]
+        ),
+        // Local API (tracer bullet 5)
+        // HTTP on 127.0.0.1 with a keychain bearer token, server-sent events, the Swift client the
+        // CLI uses, and the Stream Deck `.command` wrapper generator.
+        .target(
+            name: "LocalAPI",
+            dependencies: ["TinyHTTP", "Actions", "StateStore", "SwitchboardCore"]
+        ),
+        .testTarget(
+            name: "LocalAPITests",
+            dependencies: ["LocalAPI", "TinyHTTP", "Actions", "StateStore", "Devices", "DDCKit", "ESP32Kit", "SwitchboardCore"]
         ),
     ],
     swiftLanguageModes: [.v6]
