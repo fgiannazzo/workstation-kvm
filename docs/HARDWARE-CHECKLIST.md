@@ -200,6 +200,21 @@ Result 2026-10-11, **partial fail** (run by the orchestrating agent with Felipe'
   Lesson for every future check: a DDC/CI null reply (`err -3`, reply byte 2 not 0x02) from an idle
   Mac means the display is asleep; check `pmset -g log | grep "Display is turned"` first.
 
+Result 2026-10-12 08:5x, **fail, both tools** (display awake since 08:43:48 per `pmset -g log`,
+PBP off, Studio main on HDMI 1, bridge listed with serial 301NTQDF4860):
+
+- `monitor pbp on` → `UNVERIFIED: 0xD7 read back 1 (off)`, exit 3.
+- Prototype `lgusb uset 0xD7 0` (`08 01 55 03 07 00 03 37 51 84 03 d7 00 00 6f` + follow-up) → 0xD7 still
+  1 after 6 s. The prototype does not switch the monitor today either.
+- `monitor bridge reset` (1 device re-enumerated, same serial afterwards) → prototype `uset` → 0xD7 = 1;
+  `monitor pbp on` → `UNVERIFIED`, 0xD7 = 1.
+- `monitor pbp off` → `verified: 0xD7 = 1 (off)` every time; reads stable throughout.
+
+Conclusion: not a difference between the two senders. The bridge accepts the reports and the monitor
+ignores the command in today's state. Open questions for Felipe in GitHub issue #5 (active signal on
+the PBP sub input, OSD USB upstream selection, LG OnScreen Control or WebUSB clients, bridge traffic
+that preceded the working run). No further writes until that is understood.
+
 ## Check 3: macros and `switchboardctl run` against the controller mock (tracer bullet 3)
 
 This check **writes to the monitor**, with the same two writes as Check 2 (`0xD7 = 0` over the USB
