@@ -215,6 +215,19 @@ ignores the command in today's state. Open questions for Felipe in GitHub issue 
 the PBP sub input, OSD USB upstream selection, LG OnScreen Control or WebUSB clients, bridge traffic
 that preceded the working run). No further writes until that is understood.
 
+Result 2026-10-12 09:xx, Felipe at the monitor, guest machine connected and outputting on DP, PBP
+turned **on from the OSD** (DP top, HDMI bottom), USB upstream USB-B (Studio):
+
+- `monitor read` → `0xD7 PBP: 0 (on)`, `0xF5 main input: 1 (HDMI 1)`. The read side matches the brief.
+- `monitor pbp off` (video cable) → `verified: 0xD7 = 1 (off)`: a real on → off transition, verified.
+- `monitor pbp on` (USB bridge), right after, in that primed state → `UNVERIFIED: 0xD7 read back 1 (off)`.
+  Earlier the same morning the prototype's `lgusb uset 0xD7 0` failed the same way, with and without a
+  bridge re-enumeration, with and without the guest connected.
+
+Standing: reads and PBP off work end to end; PBP on over the USB bridge is **not reproducible** with
+either tool as of 2026-10-12. The brief's table row "PBP on: USB bridge only, write 0" needs a
+verified explanation before the app can promise it (issue #5). Until then PBP on is the OSD.
+
 ## Check 3: macros and `switchboardctl run` against the controller mock (tracer bullet 3)
 
 This check **writes to the monitor**, with the same two writes as Check 2 (`0xD7 = 0` over the USB
