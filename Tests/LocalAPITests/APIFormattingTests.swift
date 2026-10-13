@@ -13,6 +13,7 @@ struct APIFormattingTests {
         hdmiInput: [.dualup: 1, .lg4k: 2],
         controllerReachable: true,
         dualUpReachable: true,
+        displays: .off,
         lastError: "boom",
         updatedAt: Date(timeIntervalSince1970: 1_791_749_703.12)
     )
@@ -26,6 +27,7 @@ struct APIFormattingTests {
             "hdmi: dualup 1  lg4k 2  samsung unknown",
             "controller: reachable",
             "monitor: reachable",
+            "displays: off",
             "last error: boom",
             "updated: 2026-10-11T20:15:03.120Z",
         ])
@@ -40,6 +42,7 @@ struct APIFormattingTests {
             "hdmi: dualup unknown  lg4k unknown  samsung unknown",
             "controller: not reachable",
             "monitor: not reachable",
+            "displays: unknown",
             "last error: none",
             "updated: never",
         ])
@@ -54,8 +57,8 @@ struct APIFormattingTests {
 
     @Test("an event line carries the fields a person scans for")
     func eventLine() {
-        #expect(known.eventLine == "state  pbp=on main=hdmi2 usb=2 hdmi=dualup:1,lg4k:2 controller=up monitor=up error=boom")
-        #expect(SwitchboardState().eventLine == "state  pbp=unknown main=unknown usb=? hdmi=? controller=down monitor=down error=none")
+        #expect(known.eventLine == "state  pbp=on main=hdmi2 usb=2 hdmi=dualup:1,lg4k:2 controller=up monitor=up displays=off error=boom")
+        #expect(SwitchboardState().eventLine == "state  pbp=unknown main=unknown usb=? hdmi=? controller=down monitor=down displays=unknown error=none")
     }
 
     @Test("run events print as RunEvent.line, behind a run tag")

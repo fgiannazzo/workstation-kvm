@@ -15,12 +15,14 @@ public struct ActionArguments: Sendable, Equatable {
     public func display(_ name: String = "display") -> DisplayID { DisplayID(rawValue: string(name)) ?? .dualup }
 }
 
-/// The eight actions: their descriptors (for `GET /actions` and the macro editor), the validation
+/// The ten actions: their descriptors (for `GET /actions` and the macro editor), the validation
 /// of their parameters, and what each one does.
 ///
 /// The monitor writes are exactly `LGDualUp.perform(.pbpOn)` and `perform(.pbpOff)`, and an
 /// unverified write is a failure (`ActionError.unverified`). Nothing else here writes to hardware;
-/// the `hdmi.*` and `usb.*` actions go to the controller through `ControllerClient`.
+/// the `hdmi.*` and `usb.*` actions go to the controller through `ControllerClient`, and
+/// `displays.*` change macOS's display configuration through BetterDisplay (`DisplaySwitch`),
+/// which sends the monitors nothing.
 public struct ActionRegistry: Sendable {
     /// In `docs/API.md` order.
     public let descriptors: [ActionDescriptor]
@@ -48,6 +50,8 @@ public struct ActionRegistry: Sendable {
             ActionDescriptor(id: .notify, title: "Notification", parameters: [
                 .string("text"),
             ]),
+            ActionDescriptor(id: .displaysOff, title: "Displays off"),
+            ActionDescriptor(id: .displaysOn, title: "Displays on"),
         ]
     }
 
@@ -110,6 +114,8 @@ public struct ActionRegistry: Sendable {
             if context.dualUp == nil { throw ActionError.monitorNotConfigured }
         case .hdmiSelect, .hdmiResync, .usbSelect:
             if context.controller == nil { throw ActionError.controllerNotConfigured }
+        case .displaysOff, .displaysOn:
+            if context.displays == nil { throw ActionError.displaysNotConfigured }
         case .delay, .notify:
             break
         }
@@ -159,6 +165,30 @@ public struct ActionRegistry: Sendable {
             let text = arguments.string("text")
             await context.notify(text)
             return "\(id.rawValue): \(text)"
+
+        case .displaysOff:
+            let names = try await switchDisplays(on: false, context: context)
+            return "\(id.rawValue): disconnected \(names.joined(separator: ", "))"
+        case .displaysOn:
+            let names = try await switchDisplays(on: true, context: context)
+            return "\(id.rawValue): connected \(names.joined(separator: ", "))"
+        }
+    }
+
+    // MARK: Displays
+
+    /// Turns the displays off or on and puts what reads back into the store, whether or not the
+    /// switch was verified.
+    private func switchDisplays(on: Bool, context: ActionContext) async throws -> [String] {
+        guard let displays = context.displays else { throw ActionError.displaysNotConfigured }
+        do {
+            let names = on ? try await displays.turnOn() : try await displays.turnOff()
+            await context.store.setDisplays(await displays.read())
+            return names
+        } catch {
+            await context.store.setDisplays(await displays.read())
+            if error is CancellationError { throw ActionError.cancelled }
+            throw error
         }
     }
 

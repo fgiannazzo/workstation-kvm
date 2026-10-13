@@ -1,7 +1,7 @@
 import Foundation
 import SwitchboardCore
 
-/// The eight actions (`docs/DESIGN.md`, "Actions"; `docs/API.md`, `GET /actions`). The raw values
+/// The ten actions (`docs/DESIGN.md`, "Actions"; `docs/API.md`, `GET /actions`). The raw values
 /// are the stable ids used by macros, the API and the Stream Deck.
 public enum ActionID: String, Codable, CaseIterable, Sendable, Hashable {
     case monitorPBPOn = "monitor.pbp.on"
@@ -12,6 +12,8 @@ public enum ActionID: String, Codable, CaseIterable, Sendable, Hashable {
     case usbSelect = "usb.select"
     case delay = "delay"
     case notify = "notify"
+    case displaysOff = "displays.off"
+    case displaysOn = "displays.on"
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.singleValueContainer()

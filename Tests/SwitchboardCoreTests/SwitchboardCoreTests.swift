@@ -153,3 +153,25 @@ extension JSONEncoder.DateEncodingStrategy {
         }
     }
 }
+
+@Suite("DisplaysState")
+struct DisplaysStateTests {
+    @Test("aggregate: all connected on, none off, some mixed, nothing unknown")
+    func aggregate() {
+        #expect(DisplaysState.aggregate([true, true]) == .on)
+        #expect(DisplaysState.aggregate([false, false, false]) == .off)
+        #expect(DisplaysState.aggregate([true, false]) == .mixed)
+        #expect(DisplaysState.aggregate([]) == .unknown)
+    }
+
+    @Test("SwitchboardState carries displays, unknown when a client or file leaves it out")
+    func inState() throws {
+        let decoded = try JSONDecoder().decode(SwitchboardState.self, from: Data(#"{"pbp":"on"}"#.utf8))
+        #expect(decoded.displays == .unknown)
+        var state = SwitchboardState()
+        state.displays = .off
+        let object = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as? [String: Any])
+        #expect(object["displays"] as? String == "off")
+        #expect(DisplaysState.mixed.rawValue == "mixed")
+    }
+}

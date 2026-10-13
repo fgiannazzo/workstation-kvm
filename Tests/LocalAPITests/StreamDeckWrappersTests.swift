@@ -35,7 +35,7 @@ struct StreamDeckWrappersTests {
             )
 
             let names = urls.map(\.lastPathComponent)
-            #expect(names == ["guest.command", "monitor.pbp.off.command", "monitor.pbp.on.command", "monitor.read.command", "solo.command"])
+            #expect(names == ["displays.off.command", "displays.on.command", "guest.command", "monitor.pbp.off.command", "monitor.pbp.on.command", "monitor.read.command", "solo.command"])
             #expect(urls.allSatisfy { $0.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL })
 
             let guest = try read(directory.appending(path: "guest.command"))

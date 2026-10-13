@@ -20,6 +20,9 @@ public enum ActionError: Error, Sendable, Equatable {
     /// The action needs the monitor and it could not be used (not configured, display or USB bridge
     /// missing, bridge busy). The message is the underlying error.
     case monitorUnavailable(String)
+    /// `displays.off` or `displays.on` could not ask the display manager (BetterDisplay missing,
+    /// not running, or refusing). The message says which.
+    case displaysUnavailable(String)
     /// A monitor write went out but the video-cable read-back did not confirm it.
     case unverified(WriteOutcome)
     /// Another run is in progress.
@@ -35,6 +38,12 @@ public enum ActionError: Error, Sendable, Equatable {
     public static let controllerNotConfigured = ActionError.controllerUnavailable(
         "no controller is configured: set controllerURL (`switchboardctl settings set controllerURL http://host:port`) "
             + "or the \(Settings.controllerURLEnvironmentKey) environment variable"
+    )
+
+    /// The message for `displays.off` and `displays.on` when BetterDisplay is not installed.
+    public static let displaysNotConfigured = ActionError.displaysUnavailable(
+        "BetterDisplay was not found at /Applications/BetterDisplay.app; displays.off and displays.on use it "
+            + "(Pro, Apple silicon) to disconnect and reconnect the displays"
     )
 
     /// The message for an action that needs the monitor when this process has no transport for it.
@@ -77,7 +86,7 @@ extension ActionError: CustomStringConvertible, LocalizedError {
             return "missing parameter \"\(name)\""
         case .invalidParameter(let name, let reason):
             return "invalid parameter \"\(name)\": \(reason)"
-        case .controllerUnavailable(let message), .monitorUnavailable(let message):
+        case .controllerUnavailable(let message), .monitorUnavailable(let message), .displaysUnavailable(let message):
             return message
         case .unverified(let outcome):
             let code = "0x" + DDCPacket.hexString([outcome.command.code])

@@ -66,6 +66,11 @@ public final class StateStore {
         mutate { $0.dualUpReachable = reachable }
     }
 
+    /// What the display manager says about the physical displays (`displays.off` / `displays.on`).
+    public func setDisplays(_ displays: DisplaysState) {
+        mutate { $0.displays = displays }
+    }
+
     /// The last failure worth showing, or nil to clear it.
     public func setLastError(_ message: String?) {
         mutate { $0.lastError = message }

@@ -76,7 +76,7 @@ struct APIJSONTests {
         state.pbp = .on
         state.updatedAt = Date(timeIntervalSince1970: 1_791_749_703.12)
         let text = String(decoding: try APIJSON.makeEncoder().encode(state), as: UTF8.self)
-        #expect(text == #"{"controllerReachable":false,"dualUpReachable":false,"hdmiInput":{},"lastError":null,"mainInput":"unknown","pbp":"on","updatedAt":"2026-10-11T20:15:03.120Z","usbPort":null}"#)
+        #expect(text == #"{"controllerReachable":false,"displays":"unknown","dualUpReachable":false,"hdmiInput":{},"lastError":null,"mainInput":"unknown","pbp":"on","updatedAt":"2026-10-11T20:15:03.120Z","usbPort":null}"#)
 
         let back = try APIJSON.makeDecoder().decode(SwitchboardState.self, from: Data(text.utf8))
         #expect(back == state)
