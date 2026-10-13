@@ -55,7 +55,7 @@ struct SettingsTests {
     @Test("the encoded file leaves controllerURL out when it is unset and lists the other keys")
     func encodedShape() throws {
         let object = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(Settings())) as? [String: Any])
-        #expect(Set(object.keys) == ["displayNameContains", "pollingIntervalSeconds", "localAPIPort", "launchAtLogin"])
+        #expect(Set(object.keys) == ["displayNameContains", "pollingIntervalSeconds", "localAPIPort", "launchAtLogin", "displaysToTurnOff"])
     }
 
     // MARK: Environment override
@@ -224,5 +224,37 @@ struct AppSupportTests {
         #expect(AppSupport.directory(environment: ["SWITCHBOARD_SUPPORT_DIR": "/tmp/sb-test"]).path == "/tmp/sb-test")
         #expect(AppSupport.directory(environment: ["SWITCHBOARD_SUPPORT_DIR": ""]) == AppSupport.defaultDirectory())
         #expect(AppSupport.directory(environment: [:]) == AppSupport.defaultDirectory())
+    }
+}
+
+@Suite("Settings.displaysToTurnOff")
+struct DisplaysToTurnOffTests {
+    @Test("defaults to every display and survives a file without the key")
+    func defaults() throws {
+        #expect(Settings().displaysToTurnOff == [])
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data(#"{"localAPIPort": 48600}"#.utf8))
+        #expect(decoded.displaysToTurnOff == [])
+    }
+
+    @Test("set takes a comma-separated list, all or empty for every display, and text(for:) gives it back")
+    func setAndText() throws {
+        var settings = Settings()
+        try settings.set("displaysToTurnOff", to: " LG SDQHD, 302NTCZ1U003 ,, ")
+        #expect(settings.displaysToTurnOff == ["LG SDQHD", "302NTCZ1U003"])
+        #expect(settings.text(for: .displaysToTurnOff) == "LG SDQHD, 302NTCZ1U003")
+        try settings.set("displaysToTurnOff", to: "ALL")
+        #expect(settings.displaysToTurnOff == [])
+        #expect(settings.text(for: .displaysToTurnOff) == "all")
+        try settings.set("displaysToTurnOff", to: "")
+        #expect(settings.displaysToTurnOff == [])
+    }
+
+    @Test("round-trips through JSON as an array")
+    func json() throws {
+        let settings = Settings(displaysToTurnOff: ["LG SDQHD"])
+        let data = try JSONEncoder().encode(settings)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["displaysToTurnOff"] as? [String] == ["LG SDQHD"])
+        #expect(try JSONDecoder().decode(Settings.self, from: data) == settings)
     }
 }

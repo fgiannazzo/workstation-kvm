@@ -412,7 +412,7 @@ Behaviour worth knowing before building on it:
 
 Action ids (strings, stable, used by the API and the Stream Deck):
 `monitor.pbp.on`, `monitor.pbp.off`, `monitor.read`, `hdmi.select`, `hdmi.resync`,
-`usb.select`, `delay`, `notify`.
+`usb.select`, `delay`, `notify`, `displays.off`, `displays.on`.
 
 Macro JSON (`macros.json` is `{"macros": [Macro]}`):
 
@@ -436,6 +436,50 @@ the last step. Default macros shipped on first launch: `guest` (pbp on, usb port
 throw `ActionError.controllerUnavailable` with a message that names the setting and the
 environment variable to fix. `POST /run/{id}` and `switchboardctl run {id}` accept a macro id
 (parameters ignored) or an action id with its parameters.
+
+### Displays off and on (`displays.off`, `displays.on`)
+
+Not a monitor write: these change macOS's display configuration through BetterDisplay
+(`docs/BRIEF.md`, "Physical displays off for remote sessions"). Signatures:
+
+```swift
+// SwitchboardCore
+public enum DisplaysState: String, Codable, Sendable { case on, off, mixed, unknown
+    static func aggregate(_ connected: [Bool]) -> DisplaysState }
+public struct ManagedDisplay: Codable, Sendable, Hashable { name, uuid, serial?; func matches(_ selector: String) -> Bool }
+public protocol DisplayConnector: Sendable {
+    func displays() async throws -> [ManagedDisplay]                 // hardware framebuffers only (IOMobileFramebuffer), never virtual displays
+    func isConnected(_ display: ManagedDisplay) async throws -> Bool?  // nil: unknown to the connector
+    func setConnected(_ display: ManagedDisplay, _ connected: Bool) async throws
+    func connectAll() async throws
+}
+// SwitchboardState.displays: DisplaysState (JSON "displays", default unknown)
+
+// Devices
+public struct BetterDisplay: DisplayConnector { static func installed(at:) -> BetterDisplay?
+    init(executable:timeout:run:); static func parseIdentifiers(_:) -> [ManagedDisplay]? }
+public typealias CommandRunner = @Sendable (URL, [String], Duration) async throws -> CommandOutput
+public enum ProcessRunner { static let run: CommandRunner }        // no shell; kills after the timeout
+public actor FakeDisplayConnector: DisplayConnector                 // tests
+
+// Actions
+public actor DisplaySwitch {
+    init(connector:selectors:sleep:settle:attempts:)               // selectors = Settings.displaysToTurnOff
+    func read() async -> DisplaysState
+    func turnOff() async throws -> [String]                         // names; ActionError.verifyFailed per display
+    func turnOn() async throws -> [String]                          // connectAll when no selectors
+}
+// ActionContext.displays, Runtime.displays: DisplaySwitch? (nil without BetterDisplay)
+// ActionError.displaysUnavailable(String), .displaysNotConfigured
+// Settings.displaysToTurnOff: [String] (names, serials or UUIDs; [] = every physical display)
+```
+
+Each switch is read back like a monitor write: `DisplaySwitch` reads every display up to `attempts`
+times, `settle` apart, and fails with one line per display that never showed the wanted state. A
+display it disconnected is remembered for the life of the process, so it still counts as off (and
+is reconnected) if BetterDisplay stops listing it. `StateRefresher` reads `displays` on every poll and
+logs a change. Tests use `FakeDisplayConnector` and an injected `CommandRunner`; nothing in
+`swift test` starts BetterDisplay.
 
 ### Application layer (tracer bullet 3, final)
 
@@ -840,3 +884,6 @@ and `SWITCHBOARD_TOKEN_FILE` swaps the keychain for a file, both for development
 5. Subagents do not run `switchboardctl` or any binary against the real monitor at all.
    Hardware checks are run by Felipe from `docs/HARDWARE-CHECKLIST.md`.
 6. If the hardware contradicts the brief, stop and report the raw bytes.
+7. `displays.off` and `displays.on` are not monitor writes: they ask BetterDisplay to disconnect or
+   connect displays in macOS. They still change what the people at the desk see, so agents do not
+   run them; Felipe does (`docs/HARDWARE-CHECKLIST.md`, Check 7).

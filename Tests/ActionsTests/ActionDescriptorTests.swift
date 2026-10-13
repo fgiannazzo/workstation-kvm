@@ -18,7 +18,9 @@ let apiActionsJSON = """
   { "id": "usb.select", "title": "USB to port", "parameters": [
       { "name": "port", "type": "int", "min": 1, "max": 4 } ] },
   { "id": "delay",  "title": "Wait", "parameters": [ { "name": "ms", "type": "int", "min": 0, "max": 60000 } ] },
-  { "id": "notify", "title": "Notification", "parameters": [ { "name": "text", "type": "string" } ] }
+  { "id": "notify", "title": "Notification", "parameters": [ { "name": "text", "type": "string" } ] },
+  { "id": "displays.off", "title": "Displays off", "parameters": [] },
+  { "id": "displays.on",  "title": "Displays on",  "parameters": [] }
 ] }
 """
 
@@ -48,7 +50,7 @@ struct ActionDescriptorTests {
     @Test("descriptors are in API.md order and cover every action id once")
     func order() {
         let ids = ActionRegistry().descriptors.map(\.id.rawValue)
-        #expect(ids == ["monitor.pbp.on", "monitor.pbp.off", "monitor.read", "hdmi.select", "hdmi.resync", "usb.select", "delay", "notify"])
+        #expect(ids == ["monitor.pbp.on", "monitor.pbp.off", "monitor.read", "hdmi.select", "hdmi.resync", "usb.select", "delay", "notify", "displays.off", "displays.on"])
         #expect(Set(ids.compactMap(ActionID.init(rawValue:))) == Set(ActionID.allCases))
     }
 

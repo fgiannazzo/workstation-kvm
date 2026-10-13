@@ -18,19 +18,24 @@ public struct Settings: Codable, Sendable, Equatable {
     public var localAPIPort: Int = 48600
     /// Start the menu bar app at login (tracer bullet 4).
     public var launchAtLogin: Bool = false
+    /// The displays `displays.off` disconnects, by name, EDID serial or UUID as BetterDisplay lists
+    /// them. Empty: every physical display.
+    public var displaysToTurnOff: [String] = []
 
     public init(
         controllerURL: URL? = nil,
         displayNameContains: String = "SDQHD",
         pollingIntervalSeconds: Double = 30,
         localAPIPort: Int = 48600,
-        launchAtLogin: Bool = false
+        launchAtLogin: Bool = false,
+        displaysToTurnOff: [String] = []
     ) {
         self.controllerURL = controllerURL
         self.displayNameContains = displayNameContains
         self.pollingIntervalSeconds = pollingIntervalSeconds
         self.localAPIPort = localAPIPort
         self.launchAtLogin = launchAtLogin
+        self.displaysToTurnOff = displaysToTurnOff
     }
 
     // MARK: Controller URL
@@ -66,7 +71,7 @@ public struct Settings: Codable, Sendable, Equatable {
     // MARK: Codable
 
     private enum CodingKeys: String, CodingKey {
-        case controllerURL, displayNameContains, pollingIntervalSeconds, localAPIPort, launchAtLogin
+        case controllerURL, displayNameContains, pollingIntervalSeconds, localAPIPort, launchAtLogin, displaysToTurnOff
     }
 
     /// Missing keys fall back to their defaults, so an older or hand-edited file still loads.
@@ -85,6 +90,7 @@ public struct Settings: Codable, Sendable, Equatable {
         pollingIntervalSeconds = try container.decodeIfPresent(Double.self, forKey: .pollingIntervalSeconds) ?? 30
         localAPIPort = try container.decodeIfPresent(Int.self, forKey: .localAPIPort) ?? 48600
         launchAtLogin = try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
+        displaysToTurnOff = try container.decodeIfPresent([String].self, forKey: .displaysToTurnOff) ?? []
     }
 
     /// `controllerURL` is left out when nil, the rest is always written, so the file shows every
@@ -96,6 +102,7 @@ public struct Settings: Codable, Sendable, Equatable {
         try container.encode(pollingIntervalSeconds, forKey: .pollingIntervalSeconds)
         try container.encode(localAPIPort, forKey: .localAPIPort)
         try container.encode(launchAtLogin, forKey: .launchAtLogin)
+        try container.encode(displaysToTurnOff, forKey: .displaysToTurnOff)
     }
 }
 
@@ -117,6 +124,7 @@ extension Settings {
         case pollingIntervalSeconds
         case localAPIPort
         case launchAtLogin
+        case displaysToTurnOff
     }
 
     /// Sets one setting from its text form. Throws `SettingsError` for an unknown key or a value
@@ -127,6 +135,8 @@ extension Settings {
     /// - `pollingIntervalSeconds`: a number from 1 to 3600.
     /// - `localAPIPort`: 1 to 65535.
     /// - `launchAtLogin`: `true`/`false` (also `yes`/`no`, `on`/`off`, `1`/`0`).
+    /// - `displaysToTurnOff`: names, serials or UUIDs separated by commas, or `all` (or empty) for
+    ///   every physical display.
     public mutating func set(_ key: String, to value: String) throws {
         guard let known = Key(rawValue: key) else {
             throw SettingsError("unknown setting \"\(key)\"; keys: \(Key.allCases.map(\.rawValue).joined(separator: ", "))")
@@ -160,6 +170,8 @@ extension Settings {
             case "false", "no", "off", "0": launchAtLogin = false
             default: throw SettingsError("launchAtLogin must be true or false, got \"\(value)\"")
             }
+        case .displaysToTurnOff:
+            displaysToTurnOff = Self.parseDisplayList(text)
         }
     }
 
@@ -173,6 +185,14 @@ extension Settings {
                 ? String(Int(pollingIntervalSeconds)) : String(pollingIntervalSeconds)
         case .localAPIPort: return String(localAPIPort)
         case .launchAtLogin: return launchAtLogin ? "true" : "false"
+        case .displaysToTurnOff: return displaysToTurnOff.isEmpty ? "all" : displaysToTurnOff.joined(separator: ", ")
         }
+    }
+
+    /// `displaysToTurnOff` from its text form: comma-separated entries, `all` or empty for none.
+    public static func parseDisplayList(_ text: String) -> [String] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed.lowercased() == "all" { return [] }
+        return trimmed.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
 }

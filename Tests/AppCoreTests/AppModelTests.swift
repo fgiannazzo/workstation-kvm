@@ -22,7 +22,7 @@ struct AppModelTests {
             #expect(!rig.model.runtime.refresher.isRunning)
             #expect(!rig.model.isBusy)
             #expect(rig.model.runProgress == RunProgress())
-            #expect(rig.model.actions.count == 8)
+            #expect(rig.model.actions.count == 10)
             #expect(!FileManager.default.fileExists(atPath: directory.path))
         }
     }

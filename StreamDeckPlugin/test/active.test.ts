@@ -10,6 +10,8 @@ describe("actionTarget", () => {
 	it("maps the actions that set a state field", () => {
 		expect(actionTarget("monitor.pbp.on", undefined)).toEqual({ pbp: "on" });
 		expect(actionTarget("monitor.pbp.off", undefined)).toEqual({ pbp: "off" });
+		expect(actionTarget("displays.off", undefined)).toEqual({ displays: "off" });
+		expect(actionTarget("displays.on", undefined)).toEqual({ displays: "on" });
 		expect(actionTarget("usb.select", { port: 2 })).toEqual({ usbPort: 2 });
 		expect(actionTarget("usb.select", { port: "3" })).toEqual({ usbPort: 3 });
 		expect(actionTarget("hdmi.select", { display: "lg4k", input: 2 })).toEqual({ hdmiInput: { lg4k: 2 } });
@@ -79,6 +81,14 @@ describe("matches", () => {
 		expect(matches(undefined, { pbp: "on" })).toBe(false);
 		expect(matches(STATE, undefined)).toBe(false);
 		expect(matches(STATE, {})).toBe(false);
+	});
+
+	it("lights displays.off only while every display is off, and neither key while mixed", () => {
+		const off = actionTarget("displays.off", undefined);
+		const on = actionTarget("displays.on", undefined);
+		expect([matches(STATE, off), matches(STATE, on)]).toEqual([false, true]);
+		expect([matches({ ...STATE, displays: "off" }, off), matches({ ...STATE, displays: "off" }, on)]).toEqual([true, false]);
+		expect([matches({ ...STATE, displays: "mixed" }, off), matches({ ...STATE, displays: "mixed" }, on)]).toEqual([false, false]);
 	});
 
 	it("makes Guest and Solo exclusive", () => {

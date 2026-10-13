@@ -5,8 +5,9 @@ import StateStore
 import SwitchboardCore
 
 /// Keeps the `StateStore` current while the app runs: polls the monitor over the video cable
-/// every `interval`, and feeds the controller's state into the store, both from its event stream
-/// and from a poll (the stream says nothing when the controller goes away, a failed poll does).
+/// every `interval`, feeds the controller's state into the store, both from its event stream
+/// and from a poll (the stream says nothing when the controller goes away, a failed poll does),
+/// and reads whether the displays are connected (`displays`).
 ///
 /// Reads only; it never writes to any device. The CLI does not start it (a CLI command reads what
 /// it needs when it needs it).
@@ -14,6 +15,7 @@ import SwitchboardCore
 public final class StateRefresher {
     private let dualUp: LGDualUp?
     private let controller: (any ControllerClient)?
+    private let displays: DisplaySwitch?
     private let store: StateStore
     private let interval: Duration
     private let sleep: Sleeper
@@ -28,6 +30,7 @@ public final class StateRefresher {
     public init(
         dualUp: LGDualUp?,
         controller: (any ControllerClient)?,
+        displays: DisplaySwitch? = nil,
         store: StateStore,
         interval: Duration,
         sleep: @escaping Sleeper = Timing.realSleep,
@@ -35,6 +38,7 @@ public final class StateRefresher {
     ) {
         self.dualUp = dualUp
         self.controller = controller
+        self.displays = displays
         self.store = store
         self.interval = interval
         self.sleep = sleep
@@ -68,7 +72,7 @@ public final class StateRefresher {
         tasks = []
     }
 
-    /// One poll of the monitor and of the controller.
+    /// One poll of the monitor, the controller and the displays.
     public func refresh() async {
         let before = await activity?()
         if before?.isRunning == true { return }
@@ -79,11 +83,17 @@ public final class StateRefresher {
         if let controller {
             do { controllerState = .success(try await controller.state()) } catch { controllerState = .failure(error) }
         }
+        var displaysState: DisplaysState?
+        if let displays { displaysState = await displays.read() }
 
         // A run that started (or ran) while we were reading owns the monitor state now.
         if let before, await activity?() != before { return }
         if Task.isCancelled { return }
 
+        if let displaysState, displaysState != store.state.displays {
+            store.log(.info, "displays \(displaysState.rawValue)")
+            store.setDisplays(displaysState)
+        }
         if let reading {
             let reachable = !reading.raw.isEmpty
             if reachable != store.state.dualUpReachable {

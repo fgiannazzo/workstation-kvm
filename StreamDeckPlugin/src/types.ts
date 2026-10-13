@@ -6,6 +6,8 @@
 export type PbpState = "on" | "off" | "unknown";
 export type MainInput = "hdmi1" | "hdmi2" | "unknown";
 export type DisplayId = "dualup" | "lg4k" | "samsung";
+/** Whether the Mac drives the physical displays (`displays.off` / `displays.on`). */
+export type DisplaysState = "on" | "off" | "mixed" | "unknown";
 
 /** `GET /state` and the payload of every `state` event on `GET /events`. */
 export interface SwitchboardState {
@@ -17,6 +19,8 @@ export interface SwitchboardState {
 	hdmiInput: Partial<Record<DisplayId, number>>;
 	controllerReachable: boolean;
 	dualUpReachable: boolean;
+	/** Absent from servers older than `displays.off`; treated as unknown. */
+	displays?: DisplaysState;
 	lastError: string | null;
 	/** ISO 8601 with fractional seconds and `Z`. */
 	updatedAt: string;

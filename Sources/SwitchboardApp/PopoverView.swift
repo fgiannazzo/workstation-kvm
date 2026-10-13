@@ -51,6 +51,7 @@ private struct StateSection: View {
                 row("PBP", state.pbp.title)
                 row("Main input", state.mainInput.title)
                 row("USB port", state.usbPortTitle)
+                row("Displays", state.displays.title)
                 ForEach(DisplayID.allCases, id: \.self) { display in
                     GridRow {
                         Text(display.title).foregroundStyle(.secondary)
@@ -176,6 +177,15 @@ private struct ControlsSection: View {
                 Button("PBP off") { Task { await model.run(.monitorPBPOff) } }
                 Button("Read monitor") { Task { await model.run(.monitorRead) } }
             }
+
+            HStack(spacing: 6) {
+                Button("Displays off") { Task { await model.run(.displaysOff) } }
+                Button("Displays on") { Task { await model.run(.displaysOn) } }
+            }
+            .disabled(!model.canSwitchDisplays)
+            .help(model.canSwitchDisplays
+                ? "Disconnect or reconnect the physical displays through BetterDisplay"
+                : "Needs BetterDisplay (Pro) in /Applications")
 
             VStack(alignment: .leading, spacing: 6) {
                 LabeledContent("USB port") {

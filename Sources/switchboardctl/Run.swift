@@ -32,7 +32,9 @@ let runHelp = """
       settings show [--json]            print the settings
       settings set <key> <value>        change a setting; keys: controllerURL (http://host:port or
                                         none), displayNameContains, pollingIntervalSeconds,
-                                        localAPIPort, launchAtLogin (true|false)
+                                        localAPIPort, launchAtLogin (true|false),
+                                        displaysToTurnOff (names or serials, comma-separated,
+                                        or all)
     """
 
 // MARK: - Output

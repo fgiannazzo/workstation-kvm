@@ -43,10 +43,16 @@ The `SwitchboardState` object:
   "hdmiInput": { "dualup": 1, "lg4k": 2, "samsung": 1 },   // assumed state, keys may be missing
   "controllerReachable": true,
   "dualUpReachable": true,
+  "displays": "on",                  // "on" | "off" | "mixed" | "unknown": physical displays connected?
   "lastError": null,                 // string or null
   "updatedAt": "2026-10-11T20:15:03.120Z"
 }
 ```
+
+`displays` says whether the Mac drives the physical displays that `displays.off` disconnects
+(through BetterDisplay): `on`, `off`, `mixed` (some of them), or `unknown` (BetterDisplay missing or
+not answering). Clients written before it existed treat it as absent, and a client should treat an
+absent `displays` as `unknown`.
 
 Every key is always present (`usbPort` and `lastError` are explicit `null`, `hdmiInput` is `{}`
 when nothing is known). `updatedAt` of a state that has never been updated, such as a freshly
@@ -68,7 +74,9 @@ launched app before its first read, is `0001-01-01T00:00:00.000Z`.
   { "id": "usb.select", "title": "USB to port", "parameters": [
       { "name": "port", "type": "int", "min": 1, "max": 4 } ] },
   { "id": "delay",  "title": "Wait", "parameters": [ { "name": "ms", "type": "int", "min": 0, "max": 60000 } ] },
-  { "id": "notify", "title": "Notification", "parameters": [ { "name": "text", "type": "string" } ] }
+  { "id": "notify", "title": "Notification", "parameters": [ { "name": "text", "type": "string" } ] },
+  { "id": "displays.off", "title": "Displays off", "parameters": [] },
+  { "id": "displays.on",  "title": "Displays on",  "parameters": [] }
 ] }
 ```
 

@@ -33,6 +33,17 @@ extension MainInput {
     }
 }
 
+extension DisplaysState {
+    public var title: String {
+        switch self {
+        case .on: return "On"
+        case .off: return "Off"
+        case .mixed: return "Some off"
+        case .unknown: return "Unknown"
+        }
+    }
+}
+
 extension SwitchboardState {
     /// `Port 2`, or `Unknown` before the controller has answered.
     public var usbPortTitle: String {

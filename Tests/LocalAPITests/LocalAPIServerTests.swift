@@ -178,6 +178,7 @@ struct LocalAPIServerTests {
             let list = try APIJSON.makeDecoder().decode(ActionList.self, from: reply.body)
             #expect(list.actions.map(\.id.rawValue) == [
                 "monitor.pbp.on", "monitor.pbp.off", "monitor.read", "hdmi.select", "hdmi.resync", "usb.select", "delay", "notify",
+                "displays.off", "displays.on",
             ])
             let usb = try #require(list.actions.first { $0.id == .usbSelect })
             #expect(usb.parameters == [.int("port", min: 1, max: 4)])

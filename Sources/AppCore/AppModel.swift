@@ -105,6 +105,8 @@ public final class AppModel {
     public var actions: [ActionDescriptor] { runtime.registry.descriptors }
     /// The controller address in effect (the environment overrides the saved one).
     public var controllerURL: URL? { runtime.controllerURL }
+    /// Whether `displays.off` and `displays.on` can run (BetterDisplay is installed).
+    public var canSwitchDisplays: Bool { runtime.displays != nil }
     public var controllerURLComesFromEnvironment: Bool { settings.controllerURLComesFromEnvironment(environment) }
 
     // MARK: Fixed
@@ -378,6 +380,7 @@ public final class AppModel {
             || old.displayNameContains != new.displayNameContains
             || old.pollingIntervalSeconds != new.pollingIntervalSeconds
             || old.localAPIPort != new.localAPIPort
+            || old.displaysToTurnOff != new.displaysToTurnOff
     }
 
     private func applyPendingRebuild() {

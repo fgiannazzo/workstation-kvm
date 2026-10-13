@@ -11,6 +11,7 @@ describe("extractField", () => {
 			["mainInput", "hdmi1"],
 			["usbPort", "2"],
 			["controllerReachable", "true"],
+			["displays", "on"],
 			["hdmiInput.dualup", "1"],
 			["hdmiInput.lg4k", "2"],
 			["hdmiInput.samsung", "1"],
@@ -27,6 +28,8 @@ describe("extractField", () => {
 		expect(extractField(sparse, "hdmiInput.")).toBeUndefined();
 		expect(extractField(undefined, "pbp")).toBeUndefined();
 		expect(extractField(null, "pbp")).toBeUndefined();
+		const { displays: _displays, ...older } = STATE;
+		expect(extractField(older, "displays")).toBeUndefined();
 	});
 
 	it("keeps the literal unknown enum value so a label can rename it", () => {

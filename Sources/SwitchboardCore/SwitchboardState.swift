@@ -11,6 +11,8 @@ public struct SwitchboardState: Codable, Sendable, Equatable {
     public var hdmiInput: [DisplayID: Int] = [:]
     public var controllerReachable: Bool = false
     public var dualUpReachable: Bool = false
+    /// Whether the Mac drives the physical displays (`displays.off` / `displays.on`).
+    public var displays: DisplaysState = .unknown
     public var lastError: String? = nil
     public var updatedAt: Date = .distantPast
 
@@ -21,6 +23,7 @@ public struct SwitchboardState: Codable, Sendable, Equatable {
         hdmiInput: [DisplayID: Int] = [:],
         controllerReachable: Bool = false,
         dualUpReachable: Bool = false,
+        displays: DisplaysState = .unknown,
         lastError: String? = nil,
         updatedAt: Date = .distantPast
     ) {
@@ -30,12 +33,13 @@ public struct SwitchboardState: Codable, Sendable, Equatable {
         self.hdmiInput = hdmiInput
         self.controllerReachable = controllerReachable
         self.dualUpReachable = dualUpReachable
+        self.displays = displays
         self.lastError = lastError
         self.updatedAt = updatedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case pbp, mainInput, usbPort, hdmiInput, controllerReachable, dualUpReachable, lastError, updatedAt
+        case pbp, mainInput, usbPort, hdmiInput, controllerReachable, dualUpReachable, displays, lastError, updatedAt
     }
 
     public init(from decoder: any Decoder) throws {
@@ -50,6 +54,7 @@ public struct SwitchboardState: Codable, Sendable, Equatable {
         }
         controllerReachable = try container.decodeIfPresent(Bool.self, forKey: .controllerReachable) ?? false
         dualUpReachable = try container.decodeIfPresent(Bool.self, forKey: .dualUpReachable) ?? false
+        displays = try container.decodeIfPresent(DisplaysState.self, forKey: .displays) ?? .unknown
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
     }
@@ -62,6 +67,7 @@ public struct SwitchboardState: Codable, Sendable, Equatable {
         try DisplayID.encode(hdmiInput, to: container.superEncoder(forKey: .hdmiInput))
         try container.encode(controllerReachable, forKey: .controllerReachable)
         try container.encode(dualUpReachable, forKey: .dualUpReachable)
+        try container.encode(displays, forKey: .displays)
         try container.encode(lastError, forKey: .lastError)      // null when clear, per docs/API.md
         try container.encode(updatedAt, forKey: .updatedAt)
     }

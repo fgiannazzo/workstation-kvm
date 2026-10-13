@@ -39,6 +39,7 @@ extension SwitchboardState {
             "hdmi: " + hdmi.joined(separator: "  "),
             "controller: \(controllerReachable ? "reachable" : "not reachable")",
             "monitor: \(dualUpReachable ? "reachable" : "not reachable")",
+            "displays: \(displays.rawValue)",
             "last error: \(lastError ?? "none")",
             "updated: \(updatedAt <= .distantPast ? "never" : APIJSON.string(from: updatedAt))",
         ]
@@ -46,12 +47,12 @@ extension SwitchboardState {
 
     /// One line for `switchboardctl events`:
     ///
-    ///     state  pbp=on main=hdmi1 usb=2 hdmi=dualup:1,lg4k:2,samsung:1 controller=up monitor=up error=none
+    ///     state  pbp=on main=hdmi1 usb=2 hdmi=dualup:1,lg4k:2,samsung:1 controller=up monitor=up displays=on error=none
     public var eventLine: String {
         let hdmi = DisplayID.allCases.compactMap { id in hdmiInput[id].map { "\(id.rawValue):\($0)" } }.joined(separator: ",")
         return "state  pbp=\(pbp.rawValue) main=\(mainInput.rawValue) usb=\(usbPort.map(String.init) ?? "?") "
             + "hdmi=\(hdmi.isEmpty ? "?" : hdmi) controller=\(controllerReachable ? "up" : "down") "
-            + "monitor=\(dualUpReachable ? "up" : "down") error=\(lastError ?? "none")"
+            + "monitor=\(dualUpReachable ? "up" : "down") displays=\(displays.rawValue) error=\(lastError ?? "none")"
     }
 }
 

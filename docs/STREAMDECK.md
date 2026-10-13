@@ -30,6 +30,7 @@ the app is not installed (for example on a spare Mac that only has `switchboardc
    | Solo | `switchboard://run/solo` |
    | PBP off | `switchboard://run/monitor.pbp.off` |
    | USB to port 2 | `switchboard://run/usb.select?port=2` |
+   | Displays off / on (remote sessions) | `switchboard://run/displays.off`, `switchboard://run/displays.on` |
    | HDMI input of the LG 4K | `switchboard://run/hdmi.select?display=lg4k&input=2` |
 
 3. Press the key. macOS hands the URL to the Switchboard app (no browser opens) and it behaves like
@@ -64,6 +65,7 @@ writes one executable file per macro and per action that needs no parameters int
 
 ```
 guest.command   solo.command   monitor.pbp.on.command   monitor.pbp.off.command   monitor.read.command
+displays.off.command   displays.on.command
 ```
 
 Each file is two lines of shell:

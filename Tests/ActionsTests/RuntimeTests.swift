@@ -25,7 +25,7 @@ struct RuntimeTests {
             #expect(runtime.context.dualUp != nil)
             #expect(runtime.macros.directory == directory)
             #expect(!runtime.refresher.isRunning, "live does not start polling")
-            #expect(runtime.registry.descriptors.count == 8)
+            #expect(runtime.registry.descriptors.count == 10)
             #expect(runtime.store.state == SwitchboardState())
             #expect(!FileManager.default.fileExists(atPath: directory.path), "nothing is written until a store is used")
         }
