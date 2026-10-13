@@ -20,6 +20,7 @@ export const STATE: SwitchboardState = {
 	hdmiInput: { dualup: 1, lg4k: 2, samsung: 1 },
 	controllerReachable: true,
 	dualUpReachable: true,
+	displays: "on",
 	lastError: null,
 	updatedAt: "2026-10-11T20:15:03.120Z",
 };
@@ -47,6 +48,8 @@ export const ACTIONS: ActionDescriptor[] = [
 	{ id: "usb.select", title: "USB to port", parameters: [{ name: "port", type: "int", min: 1, max: 4 }] },
 	{ id: "delay", title: "Wait", parameters: [{ name: "ms", type: "int", min: 0, max: 60000 }] },
 	{ id: "notify", title: "Notification", parameters: [{ name: "text", type: "string" }] },
+	{ id: "displays.off", title: "Displays off", parameters: [] },
+	{ id: "displays.on", title: "Displays on", parameters: [] },
 ];
 
 export const MACROS: Macro[] = [

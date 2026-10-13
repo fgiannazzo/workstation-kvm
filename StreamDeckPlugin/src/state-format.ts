@@ -6,6 +6,7 @@ export const STATE_FIELDS = [
 	"mainInput",
 	"usbPort",
 	"controllerReachable",
+	"displays",
 	"hdmiInput.dualup",
 	"hdmiInput.lg4k",
 	"hdmiInput.samsung",
@@ -38,6 +39,8 @@ export function extractField(state: SwitchboardState | undefined | null, field: 
 			return typeof state.usbPort === "number" ? String(state.usbPort) : undefined;
 		case "controllerReachable":
 			return typeof state.controllerReachable === "boolean" ? String(state.controllerReachable) : undefined;
+		case "displays":
+			return typeof state.displays === "string" ? state.displays : undefined;
 		default: {
 			if (!field.startsWith("hdmiInput.")) return undefined;
 			const display = field.slice("hdmiInput.".length);

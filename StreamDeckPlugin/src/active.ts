@@ -16,6 +16,10 @@ export function actionTarget(id: string, parameters: Record<string, unknown> | u
 			return { pbp: "on" };
 		case "monitor.pbp.off":
 			return { pbp: "off" };
+		case "displays.off":
+			return { displays: "off" };
+		case "displays.on":
+			return { displays: "on" };
 		case "usb.select": {
 			const port = integer(parameters?.port);
 			return port === undefined ? undefined : { usbPort: port };
