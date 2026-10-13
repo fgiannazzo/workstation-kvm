@@ -50,6 +50,9 @@ What works today:
   "Open" action.
 - `switchboardctl state|events|token|serve|streamdeck export`; `run`, `actions` and `macros` go
   through the app when it is running and work by themselves when it is not.
+- `StreamDeckPlugin/`: the Stream Deck plugin (Run key with a lit state, USB toggle, State tile),
+  validated on a real Stream Deck against the app and the controller mock. See "Stream Deck plugin"
+  below.
 
 Phase 1 is complete: the menu bar app starts the local API at launch (`AppModel.startServices`),
 Settings shows the API address and token, and `switchboardctl`, the generated wrappers and the Stream
@@ -135,7 +138,7 @@ file says. The first time something posts a notification (the `notify` action, o
 that fails) macOS asks for permission; without it the text goes to the log.
 
 The URL scheme runs a macro, or an action with parameters, like `POST /run/{id}` will without a token
-(`docs/API.md`). From Terminal, or a Stream Deck "Open" key:
+(`docs/API.md`). From Terminal, or a Stream Deck "Website" key (`docs/STREAMDECK.md`):
 
 ```bash
 open "switchboard://run/solo"                 # a macro
@@ -301,10 +304,10 @@ file instead of the keychain (development and tests only).
 
 ## Stream Deck
 
-Phase 1 needs no plugin: the built-in **System → Open** action opens `switchboard://run/{id}`, or a
-`.command` wrapper written by `switchboardctl streamdeck export`. See
-[`docs/STREAMDECK.md`](docs/STREAMDECK.md), which also says why the Website action does not fit.
-Phase 2 is the plugin below.
+Phase 1 needs no plugin: a built-in **System → Website** key with a `switchboard://run/{id}` URL, or a
+**System → Open** key with a `.command` wrapper written by `switchboardctl streamdeck export` (the Open
+action does not take the URL). Both verified on Stream Deck 7.6.0; see
+[`docs/STREAMDECK.md`](docs/STREAMDECK.md). Phase 2 is the plugin below.
 
 ## Hardware rules
 
@@ -318,4 +321,9 @@ MIT, see `LICENSE`.
 
 ## Stream Deck plugin
 
-`StreamDeckPlugin/` holds the official Stream Deck plugin (TypeScript, Elgato SDK): a Run key that fires any macro or action through the local API, and a State tile that shows live state from `/events`. Build, install and troubleshooting steps are in [`docs/STREAMDECK-PLUGIN.md`](docs/STREAMDECK-PLUGIN.md).
+`StreamDeckPlugin/` holds the official Stream Deck plugin (TypeScript, Elgato SDK), verified on a
+Stream Deck with app 7.6.0: a Run key that fires any macro or action through the local API and lights
+up while the desk already matches it (so Guest and Solo keys show which one is active), a USB toggle
+that shows the active USB port and switches to the next, and a State tile that shows live state from
+`/events`. A key shows the warning triangle only when a run fails. Build, install and troubleshooting
+steps are in [`docs/STREAMDECK-PLUGIN.md`](docs/STREAMDECK-PLUGIN.md).
