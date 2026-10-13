@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+	<head lang="en">
+		<meta charset="utf-8" />
+		<title>Switchboard: USB toggle</title>
+		<!-- sdpi-components v4 is vendored next to this file so the inspector never loads anything from the network. -->
+		<script src="sdpi-components.js"></script>
+	</head>
+
+	<body>
+		<sdpi-item label="Ports">
+			<sdpi-textfield setting="ports" placeholder="1,2"></sdpi-textfield>
+		</sdpi-item>
+
+		<sdpi-item label="Labels">
+			<sdpi-textarea
+				setting="labels"
+				rows="3"
+				placeholder='Optional JSON, port to name: {"1": "Mac", "2": "Guest"}'
+			></sdpi-textarea>
+		</sdpi-item>
+
+		<div id="switchboard-connection"></div>
+		<script src="connection.js"></script>
+	</body>
+</html>

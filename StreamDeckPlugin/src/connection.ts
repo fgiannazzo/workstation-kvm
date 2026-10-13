@@ -2,12 +2,16 @@ import streamDeck from "@elgato/streamdeck";
 
 import { ApiClient } from "./api.js";
 import { EventsHub } from "./events-hub.js";
+import { MacroCatalog } from "./macro-catalog.js";
 import { describeConnection, resolveConnection, sameConnection, type ConnectionSettings, type GlobalSettings } from "./settings.js";
 
 const logger = streamDeck.logger.createScope("connection");
 
 /** The process-wide event stream shared by every tile and key. */
 export const hub = new EventsHub(streamDeck.logger.createScope("events"));
+
+/** The app's macros, for Run keys that light up when the desk matches their macro. */
+export const catalog = new MacroCatalog(streamDeck.logger.createScope("macros"));
 
 let current: ConnectionSettings | undefined;
 let client: ApiClient | undefined;
@@ -29,12 +33,14 @@ export function applyGlobalSettings(settings: GlobalSettings | undefined): void 
 	if (next.token === "") {
 		client = undefined;
 		hub.setClient(undefined);
+		catalog.setClient(undefined);
 		logger.warn(`No token configured for ${describeConnection(next)}; open a Switchboard key's settings and paste the token from the app`);
 		return;
 	}
 
 	client = new ApiClient(next);
 	hub.setClient(client);
+	catalog.setClient(client);
 	logger.info(`Using the Switchboard API at ${describeConnection(next)}`);
 }
 

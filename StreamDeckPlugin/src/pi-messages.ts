@@ -1,7 +1,7 @@
 import streamDeck from "@elgato/streamdeck";
 
 import { ApiClient, ApiError } from "./api.js";
-import { getClient } from "./connection.js";
+import { catalog, getClient } from "./connection.js";
 import { describeConnection, resolveConnection, type GlobalSettings } from "./settings.js";
 
 const logger = streamDeck.logger.createScope("ui");
@@ -50,6 +50,7 @@ async function loadIdItems(): Promise<(DataSourceItem | DataSourceGroup)[]> {
 	}
 	try {
 		const [macros, actions] = await Promise.all([client.macros(), client.actions()]);
+		catalog.update(macros);
 		const groups: DataSourceGroup[] = [];
 		if (macros.length) {
 			groups.push({ label: "Macros", children: macros.map((m) => ({ label: `${m.name} (${m.id})`, value: m.id })) });

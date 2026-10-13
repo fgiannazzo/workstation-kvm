@@ -1,9 +1,18 @@
-import streamDeck, { action, SingletonAction, type KeyAction, type KeyDownEvent } from "@elgato/streamdeck";
+import streamDeck, {
+	action,
+	SingletonAction,
+	type DidReceiveSettingsEvent,
+	type KeyAction,
+	type KeyDownEvent,
+	type WillAppearEvent,
+	type WillDisappearEvent,
+} from "@elgato/streamdeck";
 
-import { getClient, hub } from "../connection.js";
+import { keyTarget, matches } from "../active.js";
+import { catalog, getClient, hub } from "../connection.js";
 import { parseParameters } from "../parameters.js";
 import { RunWatch } from "../run-watch.js";
-import type { RunAccepted, RunEvent } from "../types.js";
+import type { RunAccepted, RunEvent, SwitchboardState } from "../types.js";
 
 /** Settings of one Run key. `parameters` is JSON text for the request body; `idLabel` is the
  * dropdown's text for `id`, shown while the app cannot be asked for the list. */
@@ -13,26 +22,44 @@ export type RunSettings = {
 	parameters?: string;
 };
 
+/** What `runOnKey` needs of a key: the two feedback overlays. */
+export type FeedbackKey = Pick<KeyAction<RunSettings>, "showOk" | "showAlert">;
+
+/** Manifest states of the Run action: 0 is the plain key, 1 the lit key. */
+const INACTIVE = 0;
+const ACTIVE = 1;
+
 const logger = streamDeck.logger.createScope("run");
 
 /**
- * Key action: `POST /run/{id}` on key down. `202` shows the OK check mark; any other answer or a
- * network failure shows the alert triangle and logs a warning. The key joins the event stream
- * before it posts, so it also shows the alert when an accepted run ends `failed`, however fast.
+ * Key action: `POST /run/{id}` on key down, with the check mark on `202` and the alert triangle
+ * otherwise. While visible the key also lights up (state 1) whenever the desk already matches what
+ * it would do: a macro's `verify`, the port of `usb.select`, and so on (`active.ts`).
  */
 @action({ UUID: "io.github.fgiannazzo.switchboard.run" })
 export class RunAction extends SingletonAction<RunSettings> {
+	readonly #keys = new Map<string, RunKey>();
+
+	override onWillAppear(ev: WillAppearEvent<RunSettings>): void {
+		if (!ev.action.isKey()) return;
+		const existing = this.#keys.get(ev.action.id);
+		if (existing) existing.update(ev.payload.settings);
+		else this.#keys.set(ev.action.id, new RunKey(ev.action, ev.payload.settings));
+	}
+
+	override onWillDisappear(ev: WillDisappearEvent<RunSettings>): void {
+		this.#keys.get(ev.action.id)?.dispose();
+		this.#keys.delete(ev.action.id);
+	}
+
+	override onDidReceiveSettings(ev: DidReceiveSettingsEvent<RunSettings>): void {
+		this.#keys.get(ev.action.id)?.update(ev.payload.settings);
+	}
+
 	override async onKeyDown(ev: KeyDownEvent<RunSettings>): Promise<void> {
 		const id = (ev.payload.settings.id ?? "").trim();
 		if (id === "") {
 			logger.warn("Key pressed without an id; pick a macro or action in the key's settings");
-			await ev.action.showAlert();
-			return;
-		}
-
-		const client = getClient();
-		if (!client) {
-			logger.warn(`Cannot run "${id}": host, port and token are not configured`);
 			await ev.action.showAlert();
 			return;
 		}
@@ -46,34 +73,111 @@ export class RunAction extends SingletonAction<RunSettings> {
 			return;
 		}
 
-		const watch = new RunWatch(hub);
-		if (!(await watch.ready)) logger.warn(`Event stream not ready; running "${id}" without watching for its result`);
-
-		let accepted: RunAccepted;
-		try {
-			accepted = await client.run(id, parameters);
-		} catch (error) {
-			watch.close();
-			logger.warn(`Run "${id}" failed: ${messageOf(error)}`);
-			await ev.action.showAlert();
-			return;
-		}
-		logger.info(`Run ${accepted.runId} accepted: ${accepted.kind} "${accepted.id}"`);
-
-		const early = watch.settled(accepted.runId);
-		if (early?.status === "failed") {
-			watch.close();
-			reportFailed(early);
-			await ev.action.showAlert();
-			return;
-		}
-		await ev.action.showOk();
-		void followRun(watch, accepted.runId, ev.action);
+		await runOnKey(ev.action, id, parameters);
 	}
 }
 
+/** One visible Run key: keeps its lit state in step with the desk. */
+class RunKey {
+	readonly #key: KeyAction<RunSettings>;
+	readonly #unsubscribe: () => void;
+	#settings: RunSettings;
+	#state: SwitchboardState | undefined;
+	#shown: number | undefined;
+
+	constructor(key: KeyAction<RunSettings>, settings: RunSettings) {
+		this.#key = key;
+		this.#settings = settings;
+		const unsubscribeHub = hub.subscribe({
+			onConnection: (connected) => {
+				if (!connected) this.#state = undefined;
+				else void catalog.reload();
+				this.render();
+			},
+			onState: (state) => {
+				this.#state = state;
+				this.render();
+			},
+		});
+		const unsubscribeCatalog = catalog.subscribe(() => this.render());
+		this.#unsubscribe = () => {
+			unsubscribeHub();
+			unsubscribeCatalog();
+		};
+		void catalog.reload();
+		this.render();
+	}
+
+	update(settings: RunSettings): void {
+		this.#settings = settings;
+		void catalog.reload();
+		this.render();
+	}
+
+	render(): void {
+		const next = matches(this.#state, this.#target()) ? ACTIVE : INACTIVE;
+		if (next === this.#shown) return;
+		this.#shown = next;
+		this.#key.setState(next).catch((error: unknown) => logger.warn(`setState failed: ${messageOf(error)}`));
+	}
+
+	dispose(): void {
+		this.#unsubscribe();
+	}
+
+	#target(): ReturnType<typeof keyTarget> {
+		const id = (this.#settings.id ?? "").trim();
+		if (id === "") return undefined;
+		let parameters: Record<string, unknown> | undefined;
+		try {
+			parameters = parseParameters(this.#settings.parameters);
+		} catch {
+			return undefined;
+		}
+		return keyTarget(id, parameters, catalog.macros);
+	}
+}
+
+/**
+ * Runs `id` for a key press: joins the event stream, posts once it is ready (or after 1 s), shows
+ * the check mark on `202` and the alert on anything else, and the alert again if the accepted run
+ * ends `failed`. Shared by every key that starts runs.
+ */
+export async function runOnKey(key: FeedbackKey, id: string, parameters?: Record<string, unknown>): Promise<void> {
+	const client = getClient();
+	if (!client) {
+		logger.warn(`Cannot run "${id}": host, port and token are not configured`);
+		await key.showAlert();
+		return;
+	}
+
+	const watch = new RunWatch(hub);
+	if (!(await watch.ready)) logger.warn(`Event stream not ready; running "${id}" without watching for its result`);
+
+	let accepted: RunAccepted;
+	try {
+		accepted = await client.run(id, parameters);
+	} catch (error) {
+		watch.close();
+		logger.warn(`Run "${id}" failed: ${messageOf(error)}`);
+		await key.showAlert();
+		return;
+	}
+	logger.info(`Run ${accepted.runId} accepted: ${accepted.kind} "${accepted.id}"`);
+
+	const early = watch.settled(accepted.runId);
+	if (early?.status === "failed") {
+		watch.close();
+		reportFailed(early);
+		await key.showAlert();
+		return;
+	}
+	await key.showOk();
+	void followRun(watch, accepted.runId, key);
+}
+
 /** Waits for the run's last event; a `failed` run turns the key's check mark into the alert. */
-async function followRun(watch: RunWatch, runId: string, key: KeyAction<RunSettings>): Promise<void> {
+async function followRun(watch: RunWatch, runId: string, key: FeedbackKey): Promise<void> {
 	const run = await watch.result(runId);
 	if (!run) {
 		logger.info(`Run ${runId}: no result on the event stream; the key keeps its check mark`);

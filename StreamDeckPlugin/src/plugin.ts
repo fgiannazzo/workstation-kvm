@@ -2,6 +2,7 @@ import streamDeck from "@elgato/streamdeck";
 
 import { RunAction } from "./actions/run.js";
 import { StateAction } from "./actions/state.js";
+import { UsbAction } from "./actions/usb.js";
 import { initConnection } from "./connection.js";
 import { registerPropertyInspectorHandlers } from "./pi-messages.js";
 
@@ -10,6 +11,7 @@ streamDeck.logger.setLevel("info");
 
 streamDeck.actions.registerAction(new RunAction());
 streamDeck.actions.registerAction(new StateAction());
+streamDeck.actions.registerAction(new UsbAction());
 registerPropertyInspectorHandlers();
 
 await streamDeck.connect();
