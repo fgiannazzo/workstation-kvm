@@ -42,7 +42,8 @@ export class RunAction extends SingletonAction<RunSettings> {
 	readonly #keys = new Map<string, RunKey>();
 
 	override onWillAppear(ev: WillAppearEvent<RunSettings>): void {
-		if (!ev.action.isKey()) return;
+		// Inside a multi-action the key's face belongs to the multi-action: no lit state there.
+		if (!ev.action.isKey() || ev.payload.isInMultiAction) return;
 		const existing = this.#keys.get(ev.action.id);
 		if (existing) existing.update(ev.payload.settings);
 		else this.#keys.set(ev.action.id, new RunKey(ev.action, ev.payload.settings));
