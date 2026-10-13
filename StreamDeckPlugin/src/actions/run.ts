@@ -22,8 +22,8 @@ export type RunSettings = {
 	parameters?: string;
 };
 
-/** What `runOnKey` needs of a key: the two feedback overlays. */
-export type FeedbackKey = Pick<KeyAction<RunSettings>, "showOk" | "showAlert">;
+/** What `runOnKey` needs of a key: the alert overlay. */
+export type FeedbackKey = Pick<KeyAction<RunSettings>, "showAlert">;
 
 /** Manifest states of the Run action: 0 is the plain key, 1 the lit key. */
 const INACTIVE = 0;
@@ -32,9 +32,10 @@ const ACTIVE = 1;
 const logger = streamDeck.logger.createScope("run");
 
 /**
- * Key action: `POST /run/{id}` on key down, with the check mark on `202` and the alert triangle
- * otherwise. While visible the key also lights up (state 1) whenever the desk already matches what
- * it would do: a macro's `verify`, the port of `usb.select`, and so on (`active.ts`).
+ * Key action: `POST /run/{id}` on key down, with the alert triangle when the run is refused or
+ * fails. Success shows no overlay: while visible the key lights up (state 1) whenever the desk
+ * already matches what it would do (a macro's `verify`, the port of `usb.select`, ...; `active.ts`),
+ * and that new state is the feedback.
  */
 @action({ UUID: "io.github.fgiannazzo.switchboard.run" })
 export class RunAction extends SingletonAction<RunSettings> {
@@ -139,9 +140,9 @@ class RunKey {
 }
 
 /**
- * Runs `id` for a key press: joins the event stream, posts once it is ready (or after 1 s), shows
- * the check mark on `202` and the alert on anything else, and the alert again if the accepted run
- * ends `failed`. Shared by every key that starts runs.
+ * Runs `id` for a key press: joins the event stream, posts once it is ready (or after 1 s), and
+ * shows the alert when the API refuses the run or the accepted run ends `failed`. A good run shows
+ * nothing here; the keys' lit state and faces show the new state. Shared by every key that starts runs.
  */
 export async function runOnKey(key: FeedbackKey, id: string, parameters?: Record<string, unknown>): Promise<void> {
 	const client = getClient();
@@ -165,22 +166,14 @@ export async function runOnKey(key: FeedbackKey, id: string, parameters?: Record
 	}
 	logger.info(`Run ${accepted.runId} accepted: ${accepted.kind} "${accepted.id}"`);
 
-	const early = watch.settled(accepted.runId);
-	if (early?.status === "failed") {
-		watch.close();
-		reportFailed(early);
-		await key.showAlert();
-		return;
-	}
-	await key.showOk();
 	void followRun(watch, accepted.runId, key);
 }
 
-/** Waits for the run's last event; a `failed` run turns the key's check mark into the alert. */
+/** Waits for the run's last event (it may already have arrived) and shows the alert if it `failed`. */
 async function followRun(watch: RunWatch, runId: string, key: FeedbackKey): Promise<void> {
 	const run = await watch.result(runId);
 	if (!run) {
-		logger.info(`Run ${runId}: no result on the event stream; the key keeps its check mark`);
+		logger.info(`Run ${runId}: no result on the event stream within the watch time`);
 	} else if (run.status === "failed") {
 		reportFailed(run);
 		await key.showAlert();

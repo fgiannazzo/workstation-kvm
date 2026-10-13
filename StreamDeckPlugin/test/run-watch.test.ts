@@ -63,9 +63,9 @@ describe("RunWatch", () => {
 		const watch = new RunWatch(source);
 		source.run("run-1", "started");
 		source.run("run-1", "failed", "controller unreachable");
-		expect(watch.settled("run-1")?.message).toBe("controller unreachable");
-		expect(watch.settled("run-2")).toBeUndefined();
-		expect((await watch.result("run-1"))?.status).toBe("failed");
+		const run = await watch.result("run-1");
+		expect(run?.status).toBe("failed");
+		expect(run?.message).toBe("controller unreachable");
 		expect(source.listeners.size).toBe(0);
 	});
 

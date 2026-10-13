@@ -21,7 +21,7 @@ const DEFAULT_RESULT_TIMEOUT_MS = 120_000;
  * `ready` has resolved: by then the stream has delivered a `state` event, and the server subscribes
  * to run progress before it sends that event (`docs/API.md`, "Ordering"), so no event of the run can
  * be missed. A `finished` or `failed` event that arrives before the 202 has been read is kept until
- * `settled` or `result` asks for it.
+ * `result` asks for it.
  */
 export class RunWatch {
 	/** True once the stream has delivered a state; false after the timeout or `close()`. */
@@ -47,11 +47,6 @@ export class RunWatch {
 			},
 			onRun: (run) => this.#onRun(run),
 		});
-	}
-
-	/** The run's `finished` or `failed` event if it has already arrived. */
-	settled(runId: string): RunEvent | undefined {
-		return this.#ended.get(runId);
 	}
 
 	/** The run's `finished` or `failed` event, or `undefined` if none arrives in time. Ends the watch. */
