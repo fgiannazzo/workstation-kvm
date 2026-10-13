@@ -200,6 +200,34 @@ Result 2026-10-11, **partial fail** (run by the orchestrating agent with Felipe'
   Lesson for every future check: a DDC/CI null reply (`err -3`, reply byte 2 not 0x02) from an idle
   Mac means the display is asleep; check `pmset -g log | grep "Display is turned"` first.
 
+Result 2026-10-12 08:5x, **fail, both tools** (display awake since 08:43:48 per `pmset -g log`,
+PBP off, Studio main on HDMI 1, bridge listed with serial 301NTQDF4860):
+
+- `monitor pbp on` → `UNVERIFIED: 0xD7 read back 1 (off)`, exit 3.
+- Prototype `lgusb uset 0xD7 0` (`08 01 55 03 07 00 03 37 51 84 03 d7 00 00 6f` + follow-up) → 0xD7 still
+  1 after 6 s. The prototype does not switch the monitor today either.
+- `monitor bridge reset` (1 device re-enumerated, same serial afterwards) → prototype `uset` → 0xD7 = 1;
+  `monitor pbp on` → `UNVERIFIED`, 0xD7 = 1.
+- `monitor pbp off` → `verified: 0xD7 = 1 (off)` every time; reads stable throughout.
+
+Conclusion: not a difference between the two senders. The bridge accepts the reports and the monitor
+ignores the command in today's state. Open questions for Felipe in GitHub issue #5 (active signal on
+the PBP sub input, OSD USB upstream selection, LG OnScreen Control or WebUSB clients, bridge traffic
+that preceded the working run). No further writes until that is understood.
+
+Result 2026-10-12 09:xx, Felipe at the monitor, guest machine connected and outputting on DP, PBP
+turned **on from the OSD** (DP top, HDMI bottom), USB upstream USB-B (Studio):
+
+- `monitor read` → `0xD7 PBP: 0 (on)`, `0xF5 main input: 1 (HDMI 1)`. The read side matches the brief.
+- `monitor pbp off` (video cable) → `verified: 0xD7 = 1 (off)`: a real on → off transition, verified.
+- `monitor pbp on` (USB bridge), right after, in that primed state → `UNVERIFIED: 0xD7 read back 1 (off)`.
+  Earlier the same morning the prototype's `lgusb uset 0xD7 0` failed the same way, with and without a
+  bridge re-enumeration, with and without the guest connected.
+
+Standing: reads and PBP off work end to end; PBP on over the USB bridge is **not reproducible** with
+either tool as of 2026-10-12. The brief's table row "PBP on: USB bridge only, write 0" needs a
+verified explanation before the app can promise it (issue #5). Until then PBP on is the OSD.
+
 ## Check 3: macros and `switchboardctl run` against the controller mock (tracer bullet 3)
 
 This check **writes to the monitor**, with the same two writes as Check 2 (`0xD7 = 0` over the USB
@@ -639,5 +667,37 @@ What to report if it is not that:
   `curl -s -N -H "Authorization: Bearer $TOKEN" http://127.0.0.1:48600/events` for 20 s: it should
   print one `state` event at once and `: keepalive` after 15 s.
 - Anything that contradicts `docs/BRIEF.md`: stop and paste the complete output.
+
+Record the result (date, pass/fail, pasted output) in the pull request that introduced the check.
+
+## Check 6: the app hosts the local API (integration)
+
+No monitor writes. Needs the app from Check 4 and the plugin or `curl`.
+
+Preconditions:
+
+- Nothing else listens on the API port: `lsof -nP -iTCP:48600 -sTCP:LISTEN` prints nothing
+  (quit any `switchboardctl serve`).
+- `make app` is fresh.
+
+Steps:
+
+1. `open dist/Switchboard.app`. Open **Settings…** from the popover. Expected, in the Local API
+   section: Status `listening on http://127.0.0.1:48600`, and a 43-character Token with a Copy button.
+   Wrong: Status `failed: …` (paste it; `Address already in use` means something else holds the port).
+2. `swift run switchboardctl state`. Expected: the same state the popover shows, exit 0. The first
+   run may show a keychain prompt because `switchboardctl` is a different binary from the app;
+   allow it (Always Allow keeps it from coming back). Wrong: exit 8 "app is not running" (the app
+   is not listening; see step 1) or `401` (the CLI and the app disagree about the token: paste
+   `env | grep SWITCHBOARD`).
+3. `swift run switchboardctl run usb.select port=2` with the controller mock from Check 3 configured.
+   Expected: the run goes through the app (the popover's Run row animates, the log shows the step)
+   and finishes with exit 0.
+4. Change the port in Settings to `48601`, Save. Expected: Status shows `listening on
+   http://127.0.0.1:48601` within a second; `swift run switchboardctl state --port 48601` works and
+   `--port 48600` exits 8. Change it back to `48600`, Save.
+5. Plugin smoke test (Check 5, step I) against the app instead of `serve`: the State tile shows the
+   PBP state, the Run key with `usb.select` and `{"port": 2}` gets the green check.
+6. Quit the app. Expected: `swift run switchboardctl state` exits 8 at once.
 
 Record the result (date, pass/fail, pasted output) in the pull request that introduced the check.

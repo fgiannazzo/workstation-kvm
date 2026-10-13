@@ -1,6 +1,7 @@
 import Actions
 import ESP32Kit
 import Foundation
+import LocalAPI
 import Observation
 import os
 import StateStore
@@ -33,6 +34,21 @@ public struct RunOutcome: Sendable, Equatable {
     }
 
     public var succeeded: Bool { status == .finished }
+}
+
+/// Where the local API stands. Settings shows it; `switchboardctl` and the Stream Deck plugin talk
+/// to it. The server runs inside the app process beside the UI (`AppModel.startServices`).
+public enum APIStatus: Equatable, Sendable {
+    case stopped
+    case starting
+    case running(URL)
+    case failed(String)
+
+    /// The base URL while the server listens.
+    public var url: URL? {
+        if case .running(let url) = self { return url }
+        return nil
+    }
 }
 
 /// The menu bar app's model: owns the `Runtime`, mirrors its state for SwiftUI and carries out what
@@ -75,6 +91,11 @@ public final class AppModel {
     public private(set) var launchAtLoginStatus: LaunchAtLoginStatus
     /// What to tell the user about the last launch-at-login change (approval pending, error, no bundle).
     public private(set) var launchAtLoginMessage: String?
+    /// The local API server (tracer bullet 5) as started by `startServices()`.
+    public private(set) var apiStatus: APIStatus = .stopped
+    /// The bearer token the API expects, once the server has started (read from the keychain,
+    /// created on first launch). Settings shows it with a Copy button; `switchboardctl token` prints it.
+    public private(set) var apiToken: String?
 
     /// What the monitor and the controller last reported (`runtime.store.state`).
     public var state: SwitchboardState { runtime.store.state }
@@ -98,6 +119,9 @@ public final class AppModel {
     @ObservationIgnored private let notifier: any UserNotifier
     @ObservationIgnored private let loginItem: any LaunchAtLoginService
     @ObservationIgnored private let discovery: Discovery
+    @ObservationIgnored private let tokenStore: any TokenStoring
+    @ObservationIgnored private var apiServer: LocalAPIServer?
+    @ObservationIgnored private var servicesTask: Task<Void, Never>?
     @ObservationIgnored private let notifyAction: @Sendable (String) async -> Void
     @ObservationIgnored private let logger = Logger(subsystem: AppModel.logSubsystem, category: "app")
     @ObservationIgnored private var startTask: Task<Void, Never>?
@@ -111,13 +135,15 @@ public final class AppModel {
     ///   - notifier: shows notifications (the `notify` action, URL failures).
     ///   - loginItem: the launch-at-login service.
     ///   - discovery: the mDNS lookup behind the Settings window's Discover button.
+    ///   - tokenStore: where the local API token lives; the keychain in the app, a file in tests.
     public init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         supportDirectory: URL? = nil,
         runtimeFactory: RuntimeFactory? = nil,
         notifier: any UserNotifier = SystemNotifier(),
         loginItem: any LaunchAtLoginService = MainAppLoginItem(),
-        discovery: @escaping Discovery = { await ESP32Discovery.first(timeout: $0) }
+        discovery: @escaping Discovery = { await ESP32Discovery.first(timeout: $0) },
+        tokenStore: any TokenStoring = KeychainTokenStore()
     ) {
         let directory = supportDirectory ?? AppSupport.directory(environment: environment)
         let store = StateStore()
@@ -134,6 +160,7 @@ public final class AppModel {
         self.notifier = notifier
         self.loginItem = loginItem
         self.discovery = discovery
+        self.tokenStore = tokenStore
         self.notifyAction = notifyAction
         self.settings = Settings()
         self.runtime = factory(Settings(), store, notifyAction)
@@ -179,13 +206,65 @@ public final class AppModel {
 
     // MARK: Services
 
-    /// Starts the services that run beside the UI. Tracer bullet 5 starts the local API here
-    /// (`LocalAPI` on `127.0.0.1:settings.localAPIPort`, serving `runtime.store`, `runtime.runner`,
-    /// `runtime.registry` and `runtime.macros`).
-    ///
-    /// Called at the end of `start()`, and again after every runtime rebuild (a setting the wiring
-    /// is built from changed), so an implementation stops what it started before starting anew.
+    /// Starts the local API (`LocalAPI`, 127.0.0.1 and `settings.localAPIPort`) over the current
+    /// runtime. Called at the end of `start()` and again after every runtime rebuild, so it first
+    /// stops the server it started before. The token comes from `tokenStore` (the keychain in the
+    /// app), created on first launch. Failures (port in use, keychain denied) land in `apiStatus`
+    /// and the log; the rest of the app keeps working.
     func startServices() {
+        servicesTask?.cancel()
+        let previous = apiServer
+        apiServer = nil
+        apiStatus = .starting
+        let runtime = runtime
+        servicesTask = Task { [weak self] in
+            await previous?.stop()
+            guard let self, !Task.isCancelled else { return }
+            await self.startLocalAPI(for: runtime)
+        }
+    }
+
+    private func startLocalAPI(for runtime: Runtime) async {
+        let port = runtime.settings.localAPIPort
+        guard (0...Int(UInt16.max)).contains(port) else {
+            apiStatus = .failed("invalid port \(port)")
+            record(.error, "local API: invalid port \(port)")
+            return
+        }
+        do {
+            let token = try TokenStore.loadOrCreate(using: tokenStore)
+            apiToken = token
+            let server = LocalAPIServer(runtime: runtime, port: UInt16(port), token: token)
+            try await server.start()
+            if Task.isCancelled {
+                await server.stop()
+                return
+            }
+            apiServer = server
+            let url = URL(string: "http://127.0.0.1:\(await server.port)")!
+            apiStatus = .running(url)
+            record(.info, "local API listening on \(url.absoluteString)")
+        } catch {
+            apiStatus = .failed(Self.describe(error))
+            record(.error, "local API: \(Self.describe(error))")
+        }
+    }
+
+    /// Stops the local API and waits until the port is released.
+    public func stopServices() async {
+        servicesTask?.cancel()
+        servicesTask = nil
+        let server = apiServer
+        apiServer = nil
+        await server?.stop()
+        apiStatus = .stopped
+    }
+
+    /// `stop()` plus waiting for the services to end. Tests call this so nothing outlives them;
+    /// the app calls `stop()` on termination and lets the process exit close the socket.
+    public func shutdown() async {
+        stop()
+        await stopServices()
     }
 
     // MARK: Running

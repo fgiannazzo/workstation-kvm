@@ -75,7 +75,7 @@ let package = Package(
         // drafts and AppModel. No SwiftUI.
         .target(
             name: "AppCore",
-            dependencies: ["Actions", "StateStore", "SwitchboardCore", "ESP32Kit"]
+            dependencies: ["Actions", "StateStore", "SwitchboardCore", "ESP32Kit", "LocalAPI"]
         ),
         // SwiftUI, thin: scenes and views over AppModel. Assembled into Switchboard.app by Scripts/make-app.sh.
         .executableTarget(
@@ -84,7 +84,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AppCoreTests",
-            dependencies: ["AppCore", "Actions", "StateStore", "Devices", "DDCKit", "ESP32Kit", "SwitchboardCore"]
+            dependencies: ["AppCore", "Actions", "StateStore", "Devices", "DDCKit", "ESP32Kit", "SwitchboardCore", "LocalAPI"]
         ),
         // Local API (tracer bullet 5)
         // HTTP on 127.0.0.1 with a keychain bearer token, server-sent events, the Swift client the
