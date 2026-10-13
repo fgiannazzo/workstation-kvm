@@ -14,6 +14,7 @@ const WHITE = [255, 255, 255, 1];
 const ACCENT = [78, 205, 196, 1]; // teal, reads well on the black Stream Deck key
 const KEY_BG = [28, 28, 30, 1];
 const BRAND_BG = [34, 72, 110, 1];
+const ACTIVE_BG = [21, 128, 61, 1]; // green, the lit Run key; white titles stay legible on it
 
 // --- PNG encoding -----------------------------------------------------------------------------
 
@@ -134,6 +135,15 @@ function play(canvas, color, scale = 1, cy = 0.5) {
 	canvas.fill(triangle(0.5 - 0.22 * scale, cy - 0.3 * scale, 0.5 - 0.22 * scale, cy + 0.3 * scale, 0.5 + 0.32 * scale, cy), color);
 }
 
+/** A USB plug, connector up. */
+function plug(canvas, color, scale = 1, cy = 0.5) {
+	const s = scale;
+	const head = (x, y) => roundedRect(0.5, cy - 0.22 * s, 0.32 * s, 0.24 * s, 0.02 * s)(x, y) && !roundedRect(0.5, cy - 0.22 * s, 0.18 * s, 0.1 * s, 0.01 * s)(x, y);
+	canvas.fill(head, color);
+	canvas.fill(roundedRect(0.5, cy + 0.06 * s, 0.44 * s, 0.32 * s, 0.06 * s), color);
+	canvas.fill(roundedRect(0.5, cy + 0.3 * s, 0.1 * s, 0.18 * s, 0.03 * s), color);
+}
+
 function status(canvas, color, scale = 1, cy = 0.5) {
 	canvas.fill(ring(0.5, cy, 0.34 * scale, 0.1 * scale), color);
 	canvas.fill(circle(0.5, cy, 0.13 * scale), color);
@@ -156,12 +166,27 @@ const files = {
 			play(c, ACCENT, 0.7, 0.42);
 		},
 	],
+	"actions/run/key-active": [
+		72,
+		(c) => {
+			c.fill(roundedRect(0.5, 0.5, 1, 1, 0.16), ACTIVE_BG);
+			play(c, WHITE, 0.7, 0.42);
+		},
+	],
 	"actions/state/icon": [20, (c) => status(c, WHITE)],
 	"actions/state/key": [
 		72,
 		(c) => {
 			c.fill(roundedRect(0.5, 0.5, 1, 1, 0.16), KEY_BG);
 			status(c, ACCENT, 0.32, 0.2);
+		},
+	],
+	"actions/usb/icon": [20, (c) => plug(c, WHITE, 0.95)],
+	"actions/usb/key": [
+		72,
+		(c) => {
+			c.fill(roundedRect(0.5, 0.5, 1, 1, 0.16), KEY_BG);
+			plug(c, ACCENT, 0.7, 0.5);
 		},
 	],
 };

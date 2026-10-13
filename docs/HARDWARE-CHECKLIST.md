@@ -644,11 +644,13 @@ I. The Stream Deck, with the app and the plugin (phase 2; `serve` on port 48600,
       has run nothing yet says `USB port ?, controller unreachable`.
    3. The tile shows `1`. Terminal 3: `swift run switchboardctl run usb.select port=2`. Expected: the
       tile changes to `2` within a second, with no press. Run `port=1` and it goes back.
-   4. Drag **Switchboard → Run** onto another key, id `usb.select`, Parameters `{"port": 2}`, press
-      it. Expected: the green check, terminal 1 shows `POST /usb/select {"port":2} -> 200`, and the
-      tile shows `2`. With the id `nope` the key shows the yellow triangle.
+   4. Drag **Switchboard → Run** onto another key, pick `usb.select` in the dropdown, Parameters
+      `{"port": 2}`, press it. Expected: no overlay; the key turns green (lit: USB is on port 2),
+      terminal 1 shows `POST /usb/select {"port":2} -> 200`, and the tile shows `2`. With the id `nope`
+      the key shows the yellow triangle.
    5. A phase 1 key: **System → Open**, choose `solo.command`, press it (this is step H's write).
-      `switchboard://run/solo` goes to the app, not to the API (Check 4: `open "switchboard://run/solo"`).
+      For a URL key use **System → Website** with `switchboard://run/solo`, which goes to the app, not
+      to the API (Check 4: `open "switchboard://run/solo"`); **System → Open** cannot execute a URL.
 
 What to report if it is not that:
 
@@ -669,6 +671,35 @@ What to report if it is not that:
 - Anything that contradicts `docs/BRIEF.md`: stop and paste the complete output.
 
 Record the result (date, pass/fail, pasted output) in the pull request that introduced the check.
+
+Result 2026-10-12, steps H and I (Felipe at the Stream Deck, the agent driving the CLI and reading
+logs; branch `feat/09-streamdeck-plugin-validation`). The API was served by the menu bar app, not by
+`serve` (Check 6 makes that the normal setup), with `controllerURL` on the mock at port 48700.
+
+- Step H **not run**: it writes to the monitor (`solo.command`), and this session ran no monitor
+  writes. The `.command` route itself was verified with `monitor.read.command` (step I.5 below).
+- Step I.1 pass: `npm ci && npm run build && npm test` (109 tests after this branch's fixes),
+  `npm run validate` → `Validation successful`, `npx streamdeck dev`, `link`, `restart`. Stream Deck
+  app 7.6.0 started the bundle with its own Node 24.13.1 (`StreamDeck.log`: `Plugin connected`).
+- Step I.2 pass: the Connection section rendered in the Run inspector, Test connection printed the
+  green `token accepted` line, and the plugin log said `Using the Switchboard API at 127.0.0.1:48600`.
+  The settings survived `npx streamdeck restart` and a reinstall from the packed file.
+- Step I.3 pass: tiles for `usbPort`, `hdmiInput.lg4k` with `{"1":"Studio","2":"Guest"}` and `pbp`
+  with `{"on":"PBP ON","off":"PBP OFF","unknown":"?"}` showed `2`, `Studio`, `PBP ON` and followed
+  `switchboardctl run usb.select port=2`, `controller hdmi lg4k 1` and `controller usb 1` at the mock,
+  and `run hdmi.select display=lg4k input=2`, with no press. The `state` event reached an `/events`
+  client 27 to 34 ms after each command (334 ms once). With the app quit every tile showed `?`; after
+  the relaunch the plugin reconnected on its 1, 2, 4, 8 s backoff, 6.5 s after the app was back.
+- Step I.4 pass after fixes: `usb.select` `{"port": 2}` → mock `POST /usb/select {"port":2} -> 200`;
+  `nope` → triangle, log `HTTP 404: unknown id (id=nope)`; a press during a 5 s `delay` → triangle,
+  log `HTTP 409: busy`. The first attempt at the 409 found a bug instead (an empty id saved by the
+  inspector's second control); see the pull request.
+- Step I.5: **System → Open** with `switchboard://run/monitor.read` **fails** on Stream Deck 7.6.0:
+  the field takes the URL, every press shows the triangle, `StreamDeck.log` says
+  `KA_Execute ... Invalid key press: failed to execute`. **System → Website** with the same URL works
+  (four `monitor.read` runs through the app, no browser). **System → Open** with
+  `monitor.read.command` from `streamdeck export` works: Terminal printed `finished monitor.read: ok`.
+  `docs/STREAMDECK.md` now uses Website for URLs.
 
 ## Check 6: the app hosts the local API (integration)
 
@@ -697,7 +728,24 @@ Steps:
    http://127.0.0.1:48601` within a second; `swift run switchboardctl state --port 48601` works and
    `--port 48600` exits 8. Change it back to `48600`, Save.
 5. Plugin smoke test (Check 5, step I) against the app instead of `serve`: the State tile shows the
-   PBP state, the Run key with `usb.select` and `{"port": 2}` gets the green check.
+   PBP state, the Run key with `usb.select` and `{"port": 2}` lights up green once USB is on port 2.
 6. Quit the app. Expected: `swift run switchboardctl state` exits 8 at once.
 
 Record the result (date, pass/fail, pasted output) in the pull request that introduced the check.
+
+Result 2026-10-12, pass (Felipe in the app's Settings and at the Stream Deck, the agent on the CLI):
+
+- Step 1 pass: Settings showed the Local API status line and the token with a Copy button (the token
+  Felipe pasted into the plugin came from there). Before that, the first launch of a fresh `make app`
+  build waited on a keychain prompt (a rebuilt, ad-hoc signed app is a new program to the keychain),
+  and nothing listened on 48600 until it was allowed.
+- Step 2 pass: `switchboardctl state` printed the popover's state, exit 0, after one keychain prompt
+  for the new `switchboardctl` binary.
+- Step 3 pass: `switchboardctl run usb.select port=2` → `started`, `step 1/1: usb.select: port 2`,
+  `finished usb.select: ok`, through the app.
+- Step 4 pass: port 48601 saved in Settings → `lsof` showed `127.0.0.1:48601 (LISTEN)` only,
+  `state --port 48601` worked and `state --port 48600` exited 8; back to 48600, the plugin reconnected
+  by itself on its next backoff attempt.
+- Step 5 pass: see Check 5, step I, all run against the app.
+- Step 6 pass: with the app quit, `switchboardctl state` printed `Switchboard app is not running (no
+  API at http://127.0.0.1:48600)` and exited 8 in 0.03 s.

@@ -145,8 +145,10 @@ public enum StreamDeckWrappers {
           app it reads the API token from the login keychain; the first time, macOS asks whether
           switchboardctl may use it: choose Always Allow. (After you rebuild or replace
           switchboardctl it asks again.)
-        - With the app installed, the same "Open" action also accepts switchboard://run/<id> and
-          needs no wrapper at all. See docs/STREAMDECK.md in the Switchboard repository.
+        - With the app installed, a key needs no wrapper: the "Website" action (System category)
+          with the URL switchboard://run/<id> runs it through the app. The "Open" action does not
+          take that URL (Stream Deck 7.6 reports "failed to execute"). See docs/STREAMDECK.md in
+          the Switchboard repository.
 
         """
     }

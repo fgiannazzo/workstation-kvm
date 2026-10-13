@@ -85,6 +85,11 @@ export interface MockServerOptions {
 	token?: string;
 	/** Answer every `POST /run/{id}` with `409 busy`. */
 	busy?: boolean;
+	/**
+	 * Run every accepted id at once: write its `started` and this last event to the open `/events`
+	 * streams before the `202` goes out, like a run that fails (or finishes) faster than its client.
+	 */
+	runEnds?: "finished" | "failed";
 	events?: MockEventsOptions;
 }
 
@@ -128,9 +133,18 @@ export async function startMockServer(options: MockServerOptions = {}): Promise<
 		if (req.method === "POST" && path.startsWith("/run/")) {
 			const id = decodeURIComponent(path.slice("/run/".length));
 			if (options.busy) return json(res, 409, { error: "busy", runId: "busy-0001" });
-			if (MACROS.some((macro) => macro.id === id)) {
-				return json(res, 202, { runId: `run-${++runCounter}`, id, kind: "macro" });
-			}
+			const accept = (kind: "macro" | "action"): void => {
+				const run = { runId: `run-${++runCounter}`, id, kind };
+				if (options.runEnds) {
+					const failed = options.runEnds === "failed";
+					for (const stream of streams) {
+						stream.write(formatEvent("run", { ...run, status: "started", step: 0, stepCount: 1, message: "" }));
+						stream.write(formatEvent("run", { ...run, status: options.runEnds, step: 1, stepCount: 1, message: failed ? "controller unreachable" : "ok" }));
+					}
+				}
+				json(res, 202, run);
+			};
+			if (MACROS.some((macro) => macro.id === id)) return accept("macro");
 			const action = ACTIONS.find((candidate) => candidate.id === id);
 			if (!action) return json(res, 404, { error: "unknown id", id });
 			let parameters: Record<string, unknown> = {};
@@ -144,7 +158,7 @@ export async function startMockServer(options: MockServerOptions = {}): Promise<
 			for (const parameter of action.parameters) {
 				if (!(parameter.name in parameters)) return json(res, 400, { error: "missing parameter", parameter: parameter.name });
 			}
-			return json(res, 202, { runId: `run-${++runCounter}`, id, kind: "action" });
+			return accept("action");
 		}
 
 		if (req.method === "GET" && path === "/events") {

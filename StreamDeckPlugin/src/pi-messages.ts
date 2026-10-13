@@ -1,7 +1,7 @@
 import streamDeck from "@elgato/streamdeck";
 
 import { ApiClient, ApiError } from "./api.js";
-import { getClient } from "./connection.js";
+import { catalog, getClient } from "./connection.js";
 import { describeConnection, resolveConnection, type GlobalSettings } from "./settings.js";
 
 const logger = streamDeck.logger.createScope("ui");
@@ -50,6 +50,7 @@ async function loadIdItems(): Promise<(DataSourceItem | DataSourceGroup)[]> {
 	}
 	try {
 		const [macros, actions] = await Promise.all([client.macros(), client.actions()]);
+		catalog.update(macros);
 		const groups: DataSourceGroup[] = [];
 		if (macros.length) {
 			groups.push({ label: "Macros", children: macros.map((m) => ({ label: `${m.name} (${m.id})`, value: m.id })) });
@@ -60,7 +61,7 @@ async function loadIdItems(): Promise<(DataSourceItem | DataSourceGroup)[]> {
 		return groups.length ? groups : [{ label: "The app has no macros or actions", value: "", disabled: true }];
 	} catch (error) {
 		logger.warn(`Could not list ids from ${client.baseUrl}: ${messageOf(error)}`);
-		return [{ label: "Switchboard unreachable; type the id below", value: "", disabled: true }];
+		return [{ label: "Switchboard unreachable; start the app, then refresh", value: "", disabled: true }];
 	}
 }
 

@@ -68,7 +68,7 @@ struct StreamDeckWrappersTests {
         }
     }
 
-    @Test("a README.txt explains the Open action and lists the wrappers; it is not in the returned list")
+    @Test("a README.txt explains the Open action, points URL keys at Website, and lists the wrappers; it is not in the returned list")
     func readme() throws {
         try withDirectory { directory in
             let urls = try StreamDeckWrappers.generate(into: directory, macros: MacroStore.defaultMacros, actions: registry.descriptors, switchboardctlPath: ctl)
@@ -78,6 +78,7 @@ struct StreamDeckWrappersTests {
             #expect(text.contains("guest.command"))
             #expect(text.contains("monitor.pbp.on.command"))
             #expect(text.contains("switchboard://run/"))
+            #expect(text.contains("\"Website\" action"))
             #expect(!urls.contains(readme))
             #expect(try mode(readme) == 0o644)
         }

@@ -145,7 +145,8 @@ the `run` events of one run the order is always `started`, `step`…, then `fini
 ## URL scheme
 
 `switchboard://run/{id}` and `switchboard://run/{id}?port=2` behave like `POST /run/{id}`
-without a token. The Stream Deck "Open" action (open a URL) is the simplest phase-1 key.
+without a token. A Stream Deck "Website" key with this URL is the simplest phase-1 key (the "Open"
+action does not execute URLs; `docs/STREAMDECK.md`).
 
 ## CLI equivalents
 
