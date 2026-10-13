@@ -60,7 +60,7 @@ async function loadIdItems(): Promise<(DataSourceItem | DataSourceGroup)[]> {
 		return groups.length ? groups : [{ label: "The app has no macros or actions", value: "", disabled: true }];
 	} catch (error) {
 		logger.warn(`Could not list ids from ${client.baseUrl}: ${messageOf(error)}`);
-		return [{ label: "Switchboard unreachable; type the id below", value: "", disabled: true }];
+		return [{ label: "Switchboard unreachable; start the app, then refresh", value: "", disabled: true }];
 	}
 }
 

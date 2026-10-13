@@ -8,18 +8,20 @@
 	</head>
 
 	<body>
-		<sdpi-item label="From the app">
+		<!--
+			One control per setting: sdpi-components does not sync two controls bound to the same
+			setting. label-setting keeps the chosen entry's text so it still shows while the app is down.
+		-->
+		<sdpi-item label="Run">
 			<sdpi-select
 				setting="id"
+				label-setting="idLabel"
 				datasource="getIds"
 				hot-reload
 				show-refresh
+				placeholder="Pick a macro or action"
 				loading="Asking Switchboard..."
 			></sdpi-select>
-		</sdpi-item>
-
-		<sdpi-item label="Id">
-			<sdpi-textfield setting="id" placeholder="guest, monitor.pbp.on, usb.select ..."></sdpi-textfield>
 		</sdpi-item>
 
 		<sdpi-item label="Parameters">
