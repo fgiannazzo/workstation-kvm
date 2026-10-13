@@ -164,6 +164,7 @@ what pressing it would make it, so a row of macro keys reads like radio buttons:
 | `usb.select` `{"port": N}` | `usbPort` is N |
 | `monitor.pbp.on` / `monitor.pbp.off` | `pbp` is `on` / `off` |
 | `hdmi.select`, `hdmi.resync` `{"display": D, "input": N}` | `hdmiInput.D` is N |
+| `displays.off` / `displays.on` | `displays` is `off` / `on` (neither while `mixed`) |
 | `delay`, `notify`, `monitor.read`, anything else | never |
 
 Unknown values never match, so every key is dark while the plugin is not connected. Pressing does not
@@ -171,6 +172,15 @@ flip the state (`DisableAutomaticStates`); only the desk does. You can give each
 the Stream Deck app. The plugin keeps a copy of the app's macros to know their `verify`; it reloads it
 when the connection or a key changes, when the event stream reconnects, and when an inspector lists
 the ids.
+
+### Displays off for remote sessions
+
+Two Run keys, `displays.off` and `displays.on`, turn the physical displays off and on (through
+BetterDisplay, see the README); the one that matches lights up. To press them while working remotely,
+show the Stream Deck app's on-screen Virtual Stream Deck inside the remote session, or click the same
+buttons in the Switchboard popover. A State tile on `displays` with
+`{"on": "Screens\nON", "off": "Screens\nOFF", "mixed": "Screens\nsome"}` shows it too. New on
+2026-10-12 and not yet tried on the displays (`docs/HARDWARE-CHECKLIST.md`, Check 7).
 
 ## The USB toggle
 
@@ -190,7 +200,7 @@ lights up.
 ## A State tile
 
 1. Add **Switchboard → State** to a key.
-2. Choose the **Field**: `pbp`, `mainInput`, `usbPort`, `controllerReachable`, or one of
+2. Choose the **Field**: `pbp`, `mainInput`, `usbPort`, `controllerReachable`, `displays`, or one of
    `hdmiInput.dualup`, `hdmiInput.lg4k`, `hdmiInput.samsung`.
 3. Optionally map values to titles in **Labels**, a JSON object from value to text. Use `\n` for a
    line break. Examples:

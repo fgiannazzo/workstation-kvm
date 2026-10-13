@@ -749,3 +749,65 @@ Result 2026-10-12, pass (Felipe in the app's Settings and at the Stream Deck, th
 - Step 5 pass: see Check 5, step I, all run against the app.
 - Step 6 pass: with the app quit, `switchboardctl state` printed `Switchboard app is not running (no
   API at http://127.0.0.1:48600)` and exited 8 in 0.03 s.
+
+## Check 7: displays off and on through BetterDisplay (proposed 2026-10-12)
+
+**Changes what the displays show; run it at the desk, with a way back.** `displays.off` asks
+BetterDisplay to disconnect the physical displays from macOS (they lose their signal and should go to
+standby); `displays.on` connects them again. No DDC command is sent. If anything goes wrong, power-cycle
+a display with its button to force macOS to see it again, or use BetterDisplay's menu: Tools > Manage
+Displays > connect all.
+
+Preconditions:
+
+- BetterDisplay running, Pro (`/Applications/BetterDisplay.app/Contents/MacOS/BetterDisplay get -proAvailable`
+  prints `on`), Settings > Application > Integration with the CLI on (the default).
+- All three displays on and in the arrangement: `.../BetterDisplay get -identifiers` lists `LG SDQHD`,
+  `LG HDR 4K` and `Odyssey G80SD`. (On 2026-10-12 at 22:34, after Felipe left the desk, only `LG SDQHD`
+  was listed, by BetterDisplay and by `system_profiler SPDisplaysDataType` alike; nothing had sent a
+  write. Note what the other two were doing when you start.)
+- The app from this branch (`make app`, `open dist/Switchboard.app`); `swift run switchboardctl state`
+  prints `displays: on`.
+- Something to press `displays.on` with that does not need the displays: the Stream Deck (a Run key
+  with `displays.on`), or the terminal on another machine over SSH.
+
+Steps:
+
+A. Read only: `swift run switchboardctl actions` lists `displays.off` and `displays.on`;
+   `swift run switchboardctl state` shows `displays: on`; the popover shows Displays On and two enabled
+   buttons. Expected: as written.
+
+B. One display first: `swift run switchboardctl settings set displaysToTurnOff "LG HDR 4K"`, restart
+   the app, then `swift run switchboardctl run displays.off`.
+
+   Expected: `finished displays.off: ok` with `disconnected LG HDR 4K`; the LG 4K goes dark and to
+   standby within a few seconds, its windows move to the other displays. `state` says `displays: off`
+   (it covers the named displays only). Record: does `.../BetterDisplay get -identifiers` still list
+   `LG HDR 4K`, and does `get -UUID=F64CFAAA-C233-499A-B9FA-06597C25490B -connected` print `off` or
+   `Failed.`? Then `swift run switchboardctl run displays.on`: the display comes back, and record whether
+   its windows return to it.
+
+C. The Samsung and the DualUp the same way (`displaysToTurnOff "Odyssey G80SD"`, then `"LG SDQHD"`).
+   Record what each one shows without a signal: standby, a "no signal" box, or (Samsung) its own home
+   screen. For the DualUp, also with the guest machine connected and on: does the DualUp switch to the
+   guest input by itself (auto input switch), and with PBP on does the guest half stay lit?
+
+D. Everything, with no remote session: `displaysToTurnOff all`, restart the app, `run displays.off`.
+   BetterDisplay may refuse the last display so the Mac keeps one: expected then is `failed ... verify
+   failed: LG SDQHD: BetterDisplay set ... failed (exit 1: Failed.)` with the other two off, and
+   `displays: mixed`. Record which. Then `displays.on` from the Stream Deck key.
+
+E. The real case, from another machine: connect with Jump Desktop (its virtual display appears), press
+   `displays.off` from the Stream Deck app's on-screen Virtual Stream Deck inside the session, or from
+   the popover. Expected: all three physical displays go dark, the session keeps working on the virtual
+   display, the Run key for `displays.off` is lit. Before pressing, record how
+   `.../BetterDisplay get -identifiers` lists Jump's virtual display: Switchboard only switches
+   displays whose `registryLocation` names `IOMobileFramebuffer`, so it must not have one (if it does,
+   stop and report it). Then `displays.on`, and disconnect.
+
+F. Jump Desktop's own Privacy Mode (Remote > Privacy Mode during a session), for comparison: does it
+   turn the displays off or only black them out with the backlight on, and does it get in the way of
+   `displays.off`?
+
+What to report: the `run` output of every step, the `get -identifiers` and `get -connected` answers
+from B, what each display showed in C, and anything that needed a power button to recover.

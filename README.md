@@ -33,8 +33,8 @@ What works today:
 - `switchboardctl controller ...`: talk to the controller, run the mock, run the contract test.
 - `StateStore`: `Settings` and `SettingsStore` (`settings.json`), and the `@MainActor @Observable`
   `StateStore`: one `SwitchboardState`, a 500-entry log, and `changes`, a fan-out stream of states.
-- `Actions`: the eight actions (`monitor.pbp.on|off`, `monitor.read`, `hdmi.select|resync`,
-  `usb.select`, `delay`, `notify`) with validated parameters; the macro model and `MacroStore`
+- `Actions`: the ten actions (`monitor.pbp.on|off`, `monitor.read`, `hdmi.select|resync`,
+  `usb.select`, `delay`, `notify`, `displays.off|on`) with validated parameters; the macro model and `MacroStore`
   (`macros.json`, with `guest` and `solo` created on first use); `MacroRunner`, which runs one
   macro or action at a time, stops at the first failing step (an unverified monitor write is a
   failure), checks the macro's `verify` against the state and publishes `run` events; `Runtime`
@@ -260,7 +260,16 @@ The `hdmi.*` and `usb.*` actions (and so `guest` and `solo`) need a controller: 
 else. `macros.json` is `{"macros": [...]}`, the same shape `GET /macros` serves; edit it by
 hand to add macros (`docs/DESIGN.md`, "Actions", has the format). The settings are
 `controllerURL`, `displayNameContains` (default `SDQHD`), `pollingIntervalSeconds` (30),
-`localAPIPort` (48600) and `launchAtLogin` (false).
+`localAPIPort` (48600), `launchAtLogin` (false) and `displaysToTurnOff` (`all`).
+
+`displays.off` and `displays.on` turn the physical displays off and on for remote sessions, through
+BetterDisplay (Pro) rather than DDC: BetterDisplay disconnects each display from macOS, which stops
+sending it a signal, and connects it again. `displaysToTurnOff` narrows them to some displays (names,
+serials or UUIDs, comma-separated); the default is every hardware-attached display. A virtual display,
+such as the one Jump Desktop creates for a remote session, is never switched off. Both actions read the
+displays back before they report success, and the state's `displays` field (`on`, `off`, `mixed`)
+drives the popover row and the lit Stream Deck keys. New on 2026-10-12 and not yet tried on the
+displays: `docs/HARDWARE-CHECKLIST.md`, Check 7.
 
 Exit codes: 0 ok, 1 error, 2 display not found, 3 write unverified, 4 USB bridge not found,
 5 USB bridge busy (another client, typically a browser's WebUSB client, holds it exclusively),

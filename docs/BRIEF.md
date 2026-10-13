@@ -64,6 +64,30 @@ The opposite value on each transport is accepted on the wire and ignored. Values
 
 No control port and no EDID settings. A short press of the select button toggles the input; a 3 to 5 s press toggles auto/manual mode. Run them in manual mode and pulse the button. State is not readable, so the ESP32 tracks assumed state, and the UI must offer a one-click correction.
 
+### Physical displays off for remote sessions (proposed 2026-10-12, verify with Check 7)
+
+When Felipe works on the Mac remotely (Jump Desktop Connect with its own virtual display; the Mac
+never sleeps), the physical displays should go dark so nobody at home watches the session. The
+route is BetterDisplay's connection management, not DDC: BetterDisplay 5.1.1 (Pro, installed)
+disconnects a display from macOS's configuration, after which the display gets no signal and goes to
+standby, and connects it again on request. Switchboard calls the app binary
+`/Applications/BetterDisplay.app/Contents/MacOS/BetterDisplay` with argument lists:
+
+| Purpose | Command | Seen on 2026-10-12 |
+|---|---|---|
+| list displays | `get -identifiers` | JSON objects separated by commas, no brackets; the three displays with `UUID`, `alphanumericSerial` (`301NTQDF4860`, `302NTCZ1U003`, `H1AK500000`), `deviceType` `Display` |
+| read one | `get -UUID=<uuid> -connected` | `on`, exit 0; `Failed.`, exit 1 for an unknown display; about 0.1 s |
+| Pro available | `get -proAvailable` | `on` |
+| disconnect / connect | `set -UUID=<uuid> -connected=off` / `=on` | **not yet run**: Check 7 |
+| connect all | `perform -connectAllDisplays` | **not yet run**: Check 7 |
+
+No DDC code is involved (BetterDisplay's `hardwarePowerOff` and `hardwareBacklight` are DDC writes and
+are not used). Only displays whose `registryLocation` names `IOMobileFramebuffer` (a hardware
+framebuffer) are ever switched, so the remote session's virtual display is never touched. Open questions for Check 7: whether a disconnected display stays in `get -identifiers`
+and answers `off`, whether BetterDisplay refuses to disconnect the last display when no virtual
+display is up, what the DualUp shows with its guest input live (auto input switch), whether the
+Samsung goes to standby or shows its own screen, and whether windows come back to their displays.
+
 ### ATEN US3344I
 
 RS-485 on a 5-pin terminal block, 38400 8N1, DIP-selected 422/485. Commands end with CR: `sw` (next port), `sw p01` to `sw p04`, `usb p0x` (port status), `info`. Replies `Command OK` or `Command Incorrect`. This one is readable, so its state is authoritative.
@@ -75,8 +99,8 @@ Swift package with these targets, plus one app target:
 - **`DDCKit`**: `DDCTransport` protocol; `VideoCableDDC` (IOAVService, via a C target `IOAVServiceShim` declaring the private functions); `LGUSBBridge` (IOHIDManager, write-only); `FakeDDC` for tests. Packet encoders are pure functions with tests against the byte vectors in this brief.
 - **`Devices`**: `LGDualUp` with the verified table above as a declarative whitelist. A write that is not in the whitelist is a compile-time impossibility, not a runtime check.
 - **`ESP32Kit`**: client for the contract in section 5, plus `MockESP32` (a tiny local HTTP server) used by tests and by the app when no controller is configured.
-- **`Actions`**: action registry (`monitor.pbp.on`, `monitor.pbp.off`, `monitor.read`, `hdmi.select(display, input)`, `hdmi.resync(display, input)`, `usb.select(port)`, `delay(ms)`, `notify(text)`), macro model (ordered steps, optional verify step, abort on failure), macro store as JSON in `~/Library/Application Support/Switchboard/`.
-- **`StateStore`**: one observable model: PBP state, main input, USB port, assumed HDMI input per display, controller reachability, last error. Sources: video-cable reads on a timer and after actions, ESP32 events, ATEN `info`.
+- **`Actions`**: action registry (`monitor.pbp.on`, `monitor.pbp.off`, `monitor.read`, `hdmi.select(display, input)`, `hdmi.resync(display, input)`, `usb.select(port)`, `delay(ms)`, `notify(text)`, and since 2026-10-12 `displays.off`, `displays.on` through BetterDisplay), macro model (ordered steps, optional verify step, abort on failure), macro store as JSON in `~/Library/Application Support/Switchboard/`.
+- **`StateStore`**: one observable model: PBP state, main input, USB port, assumed HDMI input per display, controller reachability, whether the physical displays are connected, last error. Sources: video-cable reads on a timer and after actions, ESP32 events, ATEN `info`.
 - **`LocalAPI`**: HTTP on `127.0.0.1` with a bearer token stored in the keychain; `GET /state`, `GET /actions`, `GET /macros`, `POST /run/{id}`, `GET /events` (server-sent events). Also a URL scheme `switchboard://run/{id}` and a CLI `switchboardctl` that calls the API. These are what a Stream Deck uses in phase 1 without a plugin: the "Website" action for keys, and a `.command` wrapper the app can generate.
 - **App**: `MenuBarExtra` with a status glyph; popover with state, virtual controls (one button per action and macro), a macro editor (list builder, no scripting), settings (controller address, token, polling interval, which display is the DualUp), and a log. Launch at login.
 
